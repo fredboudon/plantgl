@@ -145,6 +145,8 @@ AppearancePtr PglTurtle::getCurrentInitialMaterial() const{
 }
 */
 
+void  PglTurtleDrawer::reset() { __scene = ScenePtr(new Scene()); }
+
 void PglTurtleDrawer::customGeometry(const id_pair ids,
                                 AppearancePtr appearance,
                                 const FrameInfo& frameinfo, 
@@ -160,20 +162,24 @@ void PglTurtleDrawer::customGeometry(const id_pair ids,
 }
 
 GeometryPtr
-PglTurtleDrawer::transform(const FrameInfo& frameinfo, const GeometryPtr& obj) const {
+PglTurtleDrawer::transform(const FrameInfo& frameinfo, GeometryPtr obj) const {
+   
   if ( frameinfo.up != Vector3::OX ||
        frameinfo.left!= -Vector3::OY )
-       return GeometryPtr(new Oriented(frameinfo.up,-frameinfo.left,obj));
+       obj = GeometryPtr(new Oriented(frameinfo.up,-frameinfo.left,obj));
+
   if ( frameinfo.position != Vector3::ORIGIN )
-       return GeometryPtr(new Translated(frameinfo.position,obj));
+       obj = GeometryPtr(new Translated(frameinfo.position,obj));
+
+  return obj;
 }
 
 GeometryPtr
-PglTurtleDrawer::transform_n_scale(const FrameInfo& frameinfo, const GeometryPtr& obj) const {
+PglTurtleDrawer::transform_n_scale(const FrameInfo& frameinfo, GeometryPtr obj) const {
    if ( frameinfo.scaling !=  Vector3(1,1,1) &&
       (frameinfo.scaling.x() != frameinfo.scaling.y() ||
        frameinfo.scaling.y() != frameinfo.scaling.z() ))
-       return transform(frameinfo, GeometryPtr(new Scaled(frameinfo.scaling,obj)));
+       obj = GeometryPtr(new Scaled(frameinfo.scaling,obj));
 
    return transform(frameinfo, obj);
 }
@@ -492,11 +498,10 @@ PglTurtleDrawer::label(const id_pair ids,
                        AppearancePtr appearance,
                        const FrameInfo& frameinfo,
                        const std::string& text, 
-                       bool screenCoordinates,
                        int size) {
   FontPtr font;
   if (size > 0) font = FontPtr(new Font("",size));
-  if (screenCoordinates){
+  if (frameinfo.screenprojection){
     Vector3 p = (frameinfo.position + Vector3(1,1,1))*50;
      _addToScene(GeometryPtr(new Text(text, Vector3(p.y(),p.z(),p.x()) , true, font)),ids, appearance, false);
 

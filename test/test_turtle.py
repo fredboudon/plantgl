@@ -66,6 +66,17 @@ def test_turtle_polygon():
     assert len(tr.indexList) == 1
     assert len(tr.pointList) == 3
 
+def test_turtle_customgeometry():
+    p = pgl.PglTurtle()
+    p.move(0,10,0)
+    a = pgl.AsymmetricHull()
+    p.pglShape(a)
+    assert len(p.getScene()) == 1
+    a2 = retrieve_primitive(p.getScene()[0])
+    assert isinstance(a2, pgl.AsymmetricHull) 
+    assert a.getPglId() == a2.getPglId()
+
+
 if __name__ == '__main__':
     import traceback as tb
     test_func = [ (n,v) for n,v in list(globals().items()) if ('test' in n) and hasattr(v,'__code__')]

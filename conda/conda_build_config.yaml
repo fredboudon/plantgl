@@ -1,7 +1,11 @@
-python:
-  - 3.9
 numpy:
-  - 1.22
+  - 1.22                  # [win]
+  - 1.22                  # [osx]
+  - 1.22                  # [linux]
+boost:
+  - 1.74                   # [win]
+  - 1.78                   # [osx]
+  - 1.78                   # [linux]
 cxx_compiler:
   - gxx                        # [linux]
   - clangxx                    # [osx]
@@ -16,3 +20,12 @@ MACOSX_DEPLOYMENT_TARGET:  # [osx]
   - '10.12'                # [osx]
 MACOSX_SDK_VERSION:        # [osx and x86_64]
   - '10.12'                # [osx and x86_64]
+pin_run_as_build:
+  numpy: x.x
+  boost: x.x
+  qhull: x.x
+  cgap-cpp: x.x
+  ann: x.x
+  qt-main: x.x
+  libpng: x.x
+  zlib: x.x

@@ -84,10 +84,6 @@ PglTurtle::PglTurtle(TurtleDrawerPtr drawer, TurtleParam * param):
 
 PglTurtle::~PglTurtle() { }
 
-void PglTurtle::reset(){
-  resetValues();
-}
-
 void PglTurtle::clear(){
    reset();
    __appList.clear();
@@ -241,12 +237,12 @@ void PglTurtle::customGeometry(const GeometryPtr smb, real_t scale)
       _addToScene(transform(GeometryPtr(new Scaled(getScale()*scale,GeometryPtr(new Oriented(Vector3(0,1,0),Vector3(0,0,1),smb)))),false));
     else _addToScene(transform(GeometryPtr(new Scaled(getScale()*scale,smb)),false));
   }*/
-    __drawer->customGeometry(getIdPair(), getCurrentMaterial(), __params->frame_info, smb, scale);
+    __drawer->customGeometry(getIdPair(), getCurrentMaterial(), __params->frameInfo(), smb, scale);
 }
 
 void PglTurtle::pglShape(const GeometryPtr smb, real_t scale)
 {
-    __drawer->customGeometry(getIdPair(), getCurrentMaterial(), __params->frame_info, smb, scale);
+    __drawer->customGeometry(getIdPair(), getCurrentMaterial(), __params->frameInfo(), smb, scale);
 }
 
 void PglTurtle::pglShape(const ShapePtr shape, real_t scale)
@@ -254,7 +250,7 @@ void PglTurtle::pglShape(const ShapePtr shape, real_t scale)
 
     AppearancePtr prevapp  = __params->customMaterial;
     setCustomAppearance(shape->getAppearance());
-    __drawer->customGeometry(getIdPair(), getCurrentMaterial(), __params->frame_info, shape->getGeometry());
+    __drawer->customGeometry(getIdPair(), getCurrentMaterial(), __params->frameInfo(), shape->getGeometry());
     setCustomAppearance(prevapp);
 }
 void PglTurtle::pglShape(const ScenePtr scene, real_t scale)
@@ -264,7 +260,7 @@ void PglTurtle::pglShape(const ScenePtr scene, real_t scale)
         ShapePtr sh = dynamic_pointer_cast<Shape>(*it);
         if (sh) {
             setCustomAppearance(sh->getAppearance());
-            __drawer->customGeometry(getIdPair(), getCurrentMaterial(), __params->frame_info, sh->getGeometry());
+            __drawer->customGeometry(getIdPair(), getCurrentMaterial(), __params->frameInfo(), sh->getGeometry());
         }
     }
     setCustomAppearance(prevapp);
@@ -277,7 +273,7 @@ void PglTurtle::surface(const string& name, real_t scale){
     error("Unknown surface '" + name + '\'');
   }
   if(scale < -GEOM_EPSILON) warning("Invalid scale for surface");
-  __drawer->customGeometry(getIdPair(), getCurrentMaterial(), __params->frame_info, it->second, scale);
+  __drawer->customGeometry(getIdPair(), getCurrentMaterial(), __params->frameInfo(), it->second, scale);
 }
 
 #include "plantgl/algo/base/tesselator.h"
@@ -288,7 +284,7 @@ ScenePtr PglTurtle::partialView(){
         return drawer->partialView(
                 getIdPair(),
                 getCurrentMaterial(),
-                __params->frame_info,
+                __params->frameInfo(),
                 __params->isGeneralizedCylinderOn(),
                 __params->sectionResolution,
                 __params->pointList,
@@ -300,10 +296,77 @@ ScenePtr PglTurtle::partialView(){
     return {};
 }
 
+/*
 AppearancePtr PglTurtle::getCurrentMaterial() {
     if(__params->customMaterial) {
         return __params->customMaterial;
     } else {
         return __appList.at(__params->color);
     }
+}*/
+
+AppearancePtr PglTurtle::getCurrentMaterial() const{
+    if (__params->customMaterial) return __params->customMaterial;
+    if (getColor() < __appList.size()){
+        AppearancePtr res = __appList[getColor()];
+        if (res->isTexture()){
+            real_t texshiftY = __params->axialLength;
+            Vector2 texshift(0,texshiftY*__params->texCoordScale.y());
+            if ( norm(texshift) > GEOM_EPSILON || __params->texCoordScale != Vector2(1,1) ||
+                 __params->texCoordTranslation != Vector2(0,0) ||
+                 __params->texCoordRotAngle != 0){
+
+                Texture2DPtr tex = new Texture2D(
+                    dynamic_pointer_cast<Texture2D>(res)->getImage(),
+                    new Texture2DTransformation(__params->texCoordScale,
+                                            __params->texCoordTranslation + texshift,
+                                            __params->texCoordRotCenter,
+                                            __params->texCoordRotAngle*GEOM_RAD),
+                    __params->texBaseColor);
+               return AppearancePtr(tex);
+            }
+            else if(__params->texBaseColor != Texture2D::DEFAULT_BASECOLOR){
+                Texture2DPtr tex = new Texture2D(
+                    dynamic_pointer_cast<Texture2D>(res)->getImage(),
+                    Texture2DTransformationPtr(0),
+                    __params->texBaseColor);
+               return AppearancePtr(tex);
+
+            }
+        }
+        return res;
+    }
+   else return AppearancePtr(new Material("Color_"+TOOLS(number(getColor()))));
+}
+
+AppearancePtr PglTurtle::getCurrentInitialMaterial() const{
+    if (__params->initial.customMaterial) return __params->initial.customMaterial;
+    if (__params->initial.color < __appList.size()){
+        AppearancePtr res = __appList[__params->initial.color];
+        if (res->isTexture() ){
+
+            if (__params->initial.texCoordScale != Vector2(1,1) ||
+                __params->initial.texCoordTranslation != Vector2(0,0) ||
+                __params->initial.texCoordRotAngle != 0){
+                    Texture2DPtr tex = new Texture2D(
+                        dynamic_pointer_cast<Texture2D>(res)->getImage(),
+                        new Texture2DTransformation(__params->initial.texCoordScale,
+                                                    __params->initial.texCoordTranslation,
+                                                    __params->initial.texCoordRotCenter,
+                                                    __params->initial.texCoordRotAngle*GEOM_RAD),
+                        __params->initial.texBaseColor);
+                    return AppearancePtr(tex);
+            }
+            else if(__params->initial.texBaseColor != Texture2D::DEFAULT_BASECOLOR){
+                Texture2DPtr tex = new Texture2D(
+                    dynamic_pointer_cast<Texture2D>(res)->getImage(),
+                    Texture2DTransformationPtr(0),
+                    __params->initial.texBaseColor);
+                return AppearancePtr(tex);
+
+            }
+        }
+        return res;
+    }
+   else return AppearancePtr(new Material("Color_"+TOOLS(number(__params->initial.color))));
 }

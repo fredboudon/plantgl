@@ -187,7 +187,8 @@ Turtle::str() const {
 }
 
 void Turtle::reset(){
-  resetValues();
+    resetValues();
+    if(__drawer) __drawer->reset();
 }
 
 void Turtle::resetValues(){
@@ -236,8 +237,8 @@ void Turtle::stop(){
   if(__params->isGeneralizedCylinderOn()){
       if(__params->pointList->size() > 1){
         __drawer->generalizedCylinder(getIdPair(),
-                           getCurrentMaterial(),
-                           __params->frame_info,
+                           getCurrentInitialMaterial(),
+                           __params->frameInfo(),
                            __params->pointList,
                            __params->leftList,
                            __params->radiusList,
@@ -267,8 +268,8 @@ void Turtle::stop(){
     if (__params->isGeneralizedCylinderOn()){
         if(__params->pointList->size() > 1){
             __drawer->generalizedCylinder(getIdPair(),
-                                          getCurrentMaterial(),
-                                          __params->frame_info,
+                                          getCurrentInitialMaterial(),
+                                          __params->frameInfo(),
                                           __params->pointList,
                                           __params->leftList,
                                           __params->radiusList,
@@ -319,7 +320,7 @@ void Turtle::stop(){
                                 __drawer->cylinder(
                                         getIdPair(),
                                         getCurrentMaterial(),
-                                        __params->frame_info,
+                                        __params->frameInfo(),
                                         length,
                                         __params->width,
                                         __params->sectionResolution);
@@ -327,7 +328,7 @@ void Turtle::stop(){
                                 __drawer->frustum(
                                         getIdPair(),
                                         getCurrentMaterial(),
-                                        __params->frame_info,
+                                        __params->frameInfo(),
                                         length,
                                         __params->width,
                                         topradius,
@@ -339,7 +340,7 @@ void Turtle::stop(){
                           __drawer->smallSweep(
                                   getIdPair(),
                                   getCurrentMaterial(),
-                                  __params->frame_info,
+                                  __params->frameInfo(),
                                   length,
                                   __params->width,
                                   topradius < -GEOM_EPSILON?getWidth():topradius,
@@ -692,8 +693,8 @@ void Turtle::oLineTo(const Vector3& v, real_t topradius )
       if(__params->pointList->size() > 2) {
           __drawer->polygon(
                   getIdPair(),
-                  getCurrentMaterial(),
-                  __params->frame_info,
+                  getCurrentInitialMaterial(),
+                  __params->frameInfo(),
                   __params->pointList,
                   concavetest
                   );
@@ -719,8 +720,8 @@ void Turtle::stopGC(){
     if(__params->pointList->size() > 1){
         __drawer->generalizedCylinder(
                 getIdPair(),
-                getCurrentMaterial(),
-                __params->frame_info,
+                getCurrentInitialMaterial(),
+                __params->frameInfo(),
                 __params->pointList,
                 __params->leftList,
                 __params->radiusList,
@@ -998,7 +999,7 @@ void Turtle::sphere(real_t radius )
   if (radius < -GEOM_EPSILON)
   { warning("Invalid radius for sphere"); }
   else if (radius > GEOM_EPSILON) {
-      __drawer->sphere(getIdPair(), getCurrentMaterial(), __params->frame_info, radius, __params->sectionResolution);
+      __drawer->sphere(getIdPair(), getCurrentMaterial(), __params->frameInfo(), radius, __params->sectionResolution);
   };
 }
 
@@ -1008,7 +1009,7 @@ void Turtle::circle(real_t radius )
   if (radius < -GEOM_EPSILON)
   { warning("Invalid radius for circle"); }
   else if (radius > GEOM_EPSILON) {
-      __drawer->circle(getIdPair(), getCurrentMaterial(), __params->frame_info, radius, __params->sectionResolution);
+      __drawer->circle(getIdPair(), getCurrentMaterial(), __params->frameInfo(), radius, __params->sectionResolution);
   }
 }
 
@@ -1017,7 +1018,7 @@ void Turtle::box(real_t length,real_t topradius){
           if (__params->guide) _applyGuide(length);
           if (__params->elasticity > GEOM_EPSILON) _applyTropism();
 
-          __drawer->box(getIdPair(), getCurrentMaterial(), __params->frame_info, length, __params->width, topradius);
+          __drawer->box(getIdPair(), getCurrentMaterial(), __params->frameInfo(), length, __params->width, topradius);
 
           __params->position += __params->heading*length*getScale().z();
           __params->axialLength += length;
@@ -1045,7 +1046,7 @@ void Turtle::quad(real_t length,real_t topradius){
           __drawer->quad(
                   getIdPair(),
                   getCurrentMaterial(),
-                  __params->frame_info,
+                  __params->frameInfo(),
                   length,
                   __params->width,
                   topradius
@@ -1074,7 +1075,7 @@ void Turtle::label(const std::string& text, int size )
         __drawer->label(
                 getIdPair(),
                 getCurrentMaterial(),
-                __params->frame_info,
+                __params->frameInfo(),
                 text, size);
     }
     else warning("Invalid text for label");
@@ -1093,7 +1094,7 @@ void Turtle::frame(real_t scale, real_t cap_heigth_ratio, real_t cap_radius_rati
     if (scale > GEOM_EPSILON && cap_heigth_ratio < 1 && cap_heigth_ratio > 0) {
         __drawer->frame(
                 getIdPair(),
-                __params->frame_info,
+                __params->frameInfo(),
                 scale,
                 cap_heigth_ratio,
                 __params->width,
@@ -1115,7 +1116,7 @@ void Turtle::arrow(real_t scale, real_t cap_heigth_ratio, real_t cap_radius_rati
         __drawer->arrow(
                 getIdPair(),
                 getCurrentMaterial(),
-                __params->frame_info,
+                __params->frameInfo(),
                 scale, // might be a bad name for length ???
                 cap_heigth_ratio,
                 __params->width,
@@ -1152,7 +1153,7 @@ void
 Turtle::vector(real_t heigth, real_t cap_heigth_ratio, real_t cap_radius_ratio, real_t color, real_t transparency) {
     return __drawer->arrow(
             getIdPair(),
-            __params->frame_info,
+            __params->frameInfo(),
             heigth,
             cap_heigth_ratio,
             __params->width,

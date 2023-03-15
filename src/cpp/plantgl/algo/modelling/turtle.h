@@ -354,12 +354,12 @@ public:
     virtual void stopGC();
 
     inline void sphere()
-    { __drawer->sphere(this->getIdPair(), this->getCurrentMaterial(), __params->frame_info, __params->width, __params->sectionResolution); }
+    { __drawer->sphere(this->getIdPair(), this->getCurrentMaterial(), __params->frameInfo(), __params->width, __params->sectionResolution); }
 
     void sphere(real_t radius );
 
     inline void circle()
-    { __drawer->circle(this->getIdPair(), this->getCurrentMaterial(), __params->frame_info, __params->width, __params->sectionResolution); }
+    { __drawer->circle(this->getIdPair(), this->getCurrentMaterial(), __params->frameInfo(), __params->width, __params->sectionResolution); }
 
     void circle(real_t radius );
 
@@ -497,7 +497,9 @@ public:
     inline void decColor()
     {  setColor( getColor() - color_increment ); }
 
-    virtual AppearancePtr getCurrentMaterial() { return __params->customMaterial; };
+    virtual AppearancePtr getCurrentMaterial() const { return __params->customMaterial; };
+    virtual AppearancePtr getCurrentInitialMaterial() const { return __params->initial.customMaterial; };
+    
     virtual void setCustomAppearance(const AppearancePtr app);
     inline void removeCustomAppearance() { setCustomAppearance(AppearancePtr()); }
 

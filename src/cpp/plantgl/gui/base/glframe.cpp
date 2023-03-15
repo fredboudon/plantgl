@@ -290,7 +290,7 @@ ViewGLFrame::ViewGLFrame( QWidget* parent, const char* name, ViewRendererGL * r)
 ViewGLFrame::~ViewGLFrame() {
 
   delete __scene;
-  delete __pixelbuffer;
+  if(__pixelbuffer) delete __pixelbuffer;
 
 #ifdef  PGL_DEBUG
     cout << "GL Frame deleted" << endl;
@@ -621,7 +621,15 @@ void ViewGLFrame::activatePBuffer(bool b){
           __pixelbuffer = new QOpenGLFramebufferObject(size()); // ,format()); //TOCHECK which format ?
       }
       //__pixelbuffer->makeCurrent(); ?? TOCHECK ->bind() ?? 
+      __pixelbuffer->bind();
+      printf("attach\n");
       reinitializeGL();
+   }
+   else {
+      __pixelbuffer->release();
+      printf("release\n");
+      if(__pixelbuffer) delete __pixelbuffer;
+      __pixelbuffer = NULL;
    }
 }
 
@@ -1307,11 +1315,15 @@ ViewGLFrame::getProjectionPixelPerColor(double* pixelwidth)
     return res;
 }
 
+QPoint toDevice(QWidget * widget, const QPoint ref) {
+  double scaling = widget->window()->devicePixelRatio();
+  return QPoint(int(ref.x()/scaling),int(ref.y()/scaling));
+}
 /*  ------------------------------------------------------------------------ */
 
 void ViewGLFrame::mousePressEvent( QMouseEvent* event)
 {
-  __mouse = event->pos();
+  __mouse = toDevice(this,event->pos());
 
   if(__mode == Selection){
     selectGL();
@@ -1375,7 +1387,7 @@ void ViewGLFrame::mouseReleaseEvent( QMouseEvent* event)
   else if(__mode == MultipleSelection){
     delete __selectionRect;
     __selectionRect = 0;
-    QPoint mouse = event->pos();
+    QPoint mouse = toDevice(this,event->pos());
     status(QString(tr("Selection from")+" (%1,%2) "+tr("to")+" (%3,%4)")
             .arg(__mouse.x()).arg(__mouse.y()).arg(mouse.x()).arg(mouse.y()),2000);
     multipleSelectGL(mouse);
@@ -1388,7 +1400,7 @@ void ViewGLFrame::mouseReleaseEvent( QMouseEvent* event)
 
 void ViewGLFrame::mouseMoveEvent( QMouseEvent* event)
 {
-  QPoint mouse = event->pos();
+  QPoint mouse = toDevice(this,event->pos());
   if(__mode == MultipleSelection){
     status(QString(tr("Selection from")+" (%1,%2) "+tr("to")+" (%3,%4)")
             .arg(__mouse.x()).arg(__mouse.y()).arg(mouse.x()).arg(mouse.y()),2000);

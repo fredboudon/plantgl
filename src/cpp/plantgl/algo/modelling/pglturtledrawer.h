@@ -67,6 +67,9 @@ public:
     const ScenePtr& getScene() const
     { return __scene;  }
 
+    virtual void  reset();
+
+
     virtual void cylinder(const id_pair ids,
                           AppearancePtr appearance,
                           const FrameInfo& frameinfo,
@@ -152,7 +155,6 @@ public:
                        AppearancePtr appearance,
                        const FrameInfo& frameinfo,
                        const std::string& text,
-                       bool screenCoordinates, 
                        int size = -1);
 
     virtual void customGeometry(const id_pair ids,
@@ -185,12 +187,12 @@ protected:
     // GeometryPtr getCircle(real_t radius) const;
 
     GeometryPtr transform(const FrameInfo& frameinfo,
-                          const GeometryPtr& obj) const;
+                          GeometryPtr obj) const;
 
-    GeometryPtr transform_n_scale(const FrameInfo& frameinfo, const GeometryPtr& obj) const;
+    GeometryPtr transform_n_scale(const FrameInfo& frameinfo, GeometryPtr obj) const;
 
 
-    void _addToScene(const GeometryPtr geom, const id_pair ids, AppearancePtr app = NULL, bool projection = true);
+    void _addToScene(const GeometryPtr geom, const id_pair ids, AppearancePtr app = NULL, bool projection = false);
 
     ScenePtr __scene;
 

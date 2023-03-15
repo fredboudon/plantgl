@@ -1,0 +1,91 @@
+{% set data = load_setup_py_data() %}
+
+package:
+  name: openalea.plantgl
+  version: {{ data.get('version') }}
+
+source:
+  path: ..
+
+about:
+  home: https://github.com/openalea/plantgl
+  license: Cecill-C
+  summary: An open-source graphic toolkit for the creation, simulation and analysis of 3D virtual plants.
+
+build:
+  number: 2
+  preserve_egg_dir: True
+
+requirements:
+  host:
+    - python
+    - setuptools
+    - numpy {{numpy}}
+    - qt=6.2.2
+    - pyside6
+    - libpng
+    - zlib
+    - eigen
+    - qhull
+    - ann
+    - boost>=1.77
+    - expat                              # [linux]
+    - libxcb                             # [linux]
+    - pthread-stubs                      # [linux]
+    - {{ cdt('mesa-libgl-devel') }}      # [linux]
+    - libglu                            # [linux]
+    - xorg-libxfixes                    # [linux]
+
+  build:
+    - python
+    - binutils_impl_linux-64            # [linux]
+    - {{ compiler('cxx') }}
+    - bison                             # [unix]
+    - flex                              # [unix]
+    - m2-bison                          # [win]
+    - m2-flex                           # [win]
+    - menuinst                          # [win]
+    - cmake
+    - pkg-config                        # [linux]
+    - make                              # [unix]
+    - {{ cdt('mesa-libgl-devel') }}     # [linux]
+    - {{ cdt('mesa-dri-drivers') }}     # [linux]
+    - {{ cdt('libxext') }}              # [linux]
+    - {{ cdt('libselinux') }}           # [linux]
+    - {{ cdt('libxdamage') }}           # [linux]
+    - {{ cdt('libxfixes') }}            # [linux]
+    - {{ cdt('libxxf86vm') }}           # [linux]
+    - {{ cdt('libxcb') }}               # [linux]
+    - {{ cdt('expat-devel') }}          # [linux]
+
+  run:
+      - python
+      - numpy {{numpy}}
+      - setuptools
+      - ipython
+      - boost
+      - qhull
+      - eigen
+      - ann
+      - qt
+      - libpng
+      - zlib
+      - pyside6
+      - xorg-libxfixes                     # [linux]
+      - libglu                             # [linux]
+
+test:
+   requires:
+     - pytest
+     - matplotlib-base
+     - pandas
+   imports:
+     - openalea.plantgl
+     - openalea.plantgl.all
+   source_files:
+     - test/**
+     - share/**
+   commands:
+     - cd test
+     - pytest -v --ignore=tofix --ignore=ui --ignore=oatest  # [unix]
+     - pytest -v --ignore=tofix --ignore=ui --ignore=oatest --ignore=test_shared_data.py  # [win]

@@ -28,7 +28,7 @@ requirements:
     - eigen
     - qhull
     - ann
-    - boost>=1.77
+    - boost=1.78
     - expat                              # [linux]
     - libxcb                             # [linux]
     - pthread-stubs                      # [linux]

@@ -31,7 +31,7 @@ endif("${isSystemDir}" STREQUAL "-1")
 
 # ---  CXX11 Compilation
 
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_FLAGS_RELEASE "-O2 -DNDEBUG")
@@ -146,6 +146,7 @@ if (Boost_FOUND)
 
     set(USE_BOOST ON)
 
+    add_compile_definitions(_HAS_AUTO_PTR_ETC=0)
     include_directories(${Boost_INCLUDE_DIR})
 else()
     define_py_macro(PGL_WITH_BOOST 0)

@@ -26,3 +26,6 @@ pin_run_as_build:
   qt: x.x
   libpng: x.x
   zlib: x.x
+
+CONDA_BUILD_SYSROOT:  # [osx]
+ - /Users/ci/Desktop/MacOSX-SDKs/MacOSX10.12.sdk # [osx]

@@ -13,7 +13,7 @@ about:
   summary: An open-source graphic toolkit for the creation, simulation and analysis of 3D virtual plants.
 
 build:
-  number: 2
+  number: 3
   preserve_egg_dir: True
 
 requirements:
@@ -21,7 +21,7 @@ requirements:
     - python
     - setuptools
     - numpy {{numpy}}
-    - qt=6.2.2
+    - qt6-main>=6.5
     - pyside6
     - libpng
     - zlib
@@ -67,7 +67,7 @@ requirements:
       - qhull
       - eigen
       - ann
-      - qt
+      - qt6-main
       - libpng
       - zlib
       - pyside6

@@ -1,8 +1,8 @@
 from .math import *
 from .scenegraph import *
 from .algo import *
-#if not pgl_support_extension('PGL_NO_QT_GUI'):
-#    from .gui import *
+if not pgl_support_extension('PGL_NO_QT_GUI'):
+    from .gui import *
 
 from . import codec
 

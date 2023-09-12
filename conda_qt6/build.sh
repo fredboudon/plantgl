@@ -86,9 +86,10 @@ export GMPDIR=${PREFIX}
 cmake -DCMAKE_INSTALL_PREFIX=${PREFIX} \
       -DCMAKE_PREFIX_PATH=${PREFIX} \
       -DCMAKE_BUILD_TYPE=Release  \
+      -DCMAKE_DISABLE_FIND_PACKAGE_CGAL=TRUE \
       -DPython3_EXECUTABLE=${PYTHON} \
        ${SYSTEM_DEPENDENT_ARGS[@]} \
-      -LAH .. 
+      -LAH ..
 
 echo
 echo "****** PGL CONFIG"

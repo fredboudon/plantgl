@@ -6,8 +6,11 @@ import os
 
 from openalea.plantgl.gui.qt.QtCore import QObject, QPoint, QTimer, Qt, Signal
 from openalea.plantgl.gui.qt.QtGui import QCursor, QFont, QColor, QImageReader, QPixmap, QGuiApplication, QPainter
-from openalea.plantgl.gui.qt.QtWidgets import QApplication, QDialog, QDockWidget, QFileDialog, QMenu, QMessageBox, QScrollArea, QSplashScreen, QVBoxLayout, QWidget, QOpenGLWidget, QGLTextRenderer
-#from openalea.plantgl.gui.qt.QtOpenGL import QOpenGLWidget 
+from openalea.plantgl.gui.qt.QtWidgets import QApplication, QDialog, QDockWidget, QFileDialog, QMenu, QMessageBox, QScrollArea, QSplashScreen, QVBoxLayout, QWidget, QGLTextRenderer
+try:
+    from openalea.plantgl.gui.qt.QtWidgets import QOpenGLWidget
+except:
+    from openalea.plantgl.gui.qt.QtOpenGL import QOpenGLWidget
 
 class MaterialPanelView (QOpenGLWidget):
     valueChanged = Signal()

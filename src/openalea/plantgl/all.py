@@ -28,5 +28,3 @@ def get_shared_data(file, share_path=pj('share','plantgl', 'database')):
                 # Develop installation
                 shared_data_path = pj(openalea.plantgl.__path__[0], pardir, pardir, pardir, share_path )
     return abspath(pj(shared_data_path, file))
-
-

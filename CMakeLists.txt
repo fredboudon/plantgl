@@ -42,7 +42,7 @@ init_py_config("${CMAKE_CURRENT_SOURCE_DIR}/src/openalea/plantgl/config.py")
 # --- (Win32) Multithreaded Compilation
 
 if (MSVC)
-    string(REGEX REPLACE "/W3" "/W0" ${CMAKE_CXX_FLAGS} "${${CMAKE_CXX_FLAGS}}") 
+    string(REGEX REPLACE "/W3" "/W0" ${CMAKE_CXX_FLAGS} "${${CMAKE_CXX_FLAGS}}")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /MD")
 
     # To fix compilation error with vc14 and boost
@@ -62,7 +62,7 @@ define_cpp_macro(PGL_USE_DOUBLE 1)
 
 
 ## ###################################################################
-## Dependencies 
+## Dependencies
 ## ###################################################################
 
 # --- Python
@@ -73,7 +73,7 @@ if (WIN32)
 endif()
 
 
-find_package (Python3 COMPONENTS Interpreter Development NumPy REQUIRED)
+find_package (Python3 3.9 EXACT COMPONENTS Interpreter Development NumPy REQUIRED)
 include_directories(${Python3_INCLUDE_DIRS})
 message(STATUS "Python version : " ${Python3_VERSION})
 message(STATUS "Python executable : " ${Python3_EXECUTABLE})
@@ -86,7 +86,7 @@ find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Widgets Network OpenGL PrintSupport)
 
 if(Qt6_FOUND)
-find_package(Qt6 REQUIRED COMPONENTS Gui OpenGLWidgets Test) 
+find_package(Qt6 REQUIRED COMPONENTS Gui OpenGLWidgets Test)
 endif()
 
 find_library(METAL Metal)
@@ -138,7 +138,7 @@ if (Boost_FOUND)
         message(STATUS "Building with Boost.Numpy")
     elseif(DEFINED Boost_NUMPY${Python3_VERSION_MAJOR}${Python3_VERSION_MINOR}_FOUND)
         define_macro(PGL_WITH_BOOST_NUMPY 1)
-        set(USE_BOOST_NUMPY ON)    
+        set(USE_BOOST_NUMPY ON)
         message(STATUS "Building with Boost.Numpy")
     else()
         define_macro(PGL_WITH_BOOST_NUMPY 0)
@@ -148,6 +148,7 @@ if (Boost_FOUND)
 
     set(USE_BOOST ON)
 
+    add_compile_definitions(_HAS_AUTO_PTR_ETC=0)
     include_directories(${Boost_INCLUDE_DIR})
 else()
     define_py_macro(PGL_WITH_BOOST 0)
@@ -164,7 +165,7 @@ if (BISON_FOUND AND FLEX_FOUND)
     define_py_macro(PGL_WITH_BISONFLEX "True")
 else()
     message(STATUS "Build PlantGL without Bison/Flex - Not found.")
-    
+
     define_py_macro(PGL_WITH_BISONFLEX "False")
 endif()
 
@@ -180,10 +181,10 @@ if (CGAL_FOUND)
     else()
         message(STATUS "Build PlantGL without GMP - Library not found. Use CGAL without it.")
     endif()
-    
+
 else()
     message(STATUS "Build PlantGL without CGAL - Library not found.")
-    
+
     define_py_macro(PGL_WITH_CGAL "False")
 endif()
 

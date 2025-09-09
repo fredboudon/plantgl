@@ -20,7 +20,7 @@ if os.environ[QT_API] in PYSIDE6_API:
         3: QTabWidget.TabPosition.East,
     }
     for idx, position in list(_tab_position.items()):
-        setattr(QTabWidget, position.name.decode("utf-8"), position)
+        setattr(QTabWidget, position.name, position)
 elif os.environ[QT_API] in PYQT5_API:
     from PyQt5.QtGui import *
     from PyQt5.QtWidgets import *

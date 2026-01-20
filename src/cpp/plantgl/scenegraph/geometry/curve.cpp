@@ -163,8 +163,11 @@ QuantisedFunctionPtr Curve2D::getArcLengthToUMapping() const
 
   real_t fk = getFirstKnot();
   real_t lk = getLastKnot();
-  uint_t stride = getStride();
 
+  if (totlength == 0)
+      return QuantisedFunctionPtr(new QuantisedFunction(Point2ArrayPtr(new Point2Array(2,Vector2(0, fk),Vector2(1.0,lk))),2));
+
+  uint_t stride = getStride();
   real_t deltau = (lk - fk)/stride;
 
   Vector2 p1 = getPointAt(fk);
@@ -184,14 +187,17 @@ QuantisedFunctionPtr Curve2D::getArcLengthToUMapping() const
         length += n;
         p1 = p2;
         points->setAt(j,Vector2(length/totlength,u));
-        ++j;
     }
+    else {
+        points->setAt(j,Vector2((length/totlength)+GEOM_EPSILON,u));
+    }
+    ++j;
   }
   points->setAt(j-1,Vector2(1.0,lk));
   if (j != stride+1){
       points = Point2ArrayPtr(new Point2Array(points->begin(),points->begin()+j));
   }
-  return QuantisedFunctionPtr(new QuantisedFunction(points,5*stride));
+  return QuantisedFunctionPtr(new QuantisedFunction(points,std::max(QuantisedFunction::DEFAULT_SAMPLING,5*stride)));
 }
 
 QuantisedFunctionPtr Curve2D::getUToArcLengthMapping() const
@@ -200,8 +206,11 @@ QuantisedFunctionPtr Curve2D::getUToArcLengthMapping() const
 
   real_t fk = getFirstKnot();
   real_t lk = getLastKnot();
-  uint_t stride = getStride();
 
+   if (totlength == 0)
+      return QuantisedFunctionPtr(new QuantisedFunction(Point2ArrayPtr(new Point2Array(2,Vector2(fk, 0),Vector2(lk, 0.0))),2));
+ 
+  uint_t stride = getStride();
   real_t deltau = (lk - fk)/stride;
 
   Vector2 p1 = getPointAt(fk);
@@ -216,10 +225,10 @@ QuantisedFunctionPtr Curve2D::getUToArcLengthMapping() const
     p2 = getPointAt(u);
     length += norm(p2 - p1);
     p1 = p2;
-    points->setAt(i,Vector2(u,length/totlength));
+    points->setAt(i,Vector2(u,totlength>=GEOM_EPSILON?length/totlength:0.0));
   }
-  points->setAt(stride,Vector2(lk,1.0));
-  return QuantisedFunctionPtr(new QuantisedFunction(points,5*stride));
+  points->setAt(stride,Vector2(lk,totlength>=GEOM_EPSILON?1.0:0.0));
+  return QuantisedFunctionPtr(new QuantisedFunction(points,std::max(QuantisedFunction::DEFAULT_SAMPLING,5*stride)));
 }
 
 /* ----------------------------------------------------------------------- */

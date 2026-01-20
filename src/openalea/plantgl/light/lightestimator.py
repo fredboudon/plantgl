@@ -70,11 +70,16 @@ class LightEstimator (LightManager):
     heavy; sampling resolution and number of lights should be tuned for interactive use.
   """
   
-  def __init__(self, scene = None, north = 90):
+  def __init__(self, scene = None, north = 90, use_precomputation = True):
       super().__init__()
       self.scene = scene
       self.north = north
       self.sensors = {}
+      self.method = eZBufferProjection
+      self.method_args = {}
+      self.use_precomputation = use_precomputation
+      self.precomputed_lights = {}
+
 
   def set_scene(self, scene, north = 90):
     """
@@ -97,7 +102,31 @@ class LightEstimator (LightManager):
     self.precomputed_lights = dict(zip(self.precompute_lights.keys(), [None for i in range(len(self.precomputed_lights))]))
     return self
   
-  def estimate(self,  method=eZBufferProjection, **args):
+  def set_method(self, method, **args):
+      """
+      Set the irradiance estimation method and its parameters.
+
+      Parameters:
+        method (callable): The method used for irradiance estimation.
+        **args: Additional keyword arguments passed to the irradiance estimation method.
+      """
+      assert method in lg.available_projection_methods(), f"Method {method} is not available. Available methods are: {lg.available_projection_methods()}"
+      if method != self.method or args != self.method_args:
+         self.clear_precomputation()
+      self.method = method
+      self.method_args = args
+
+  def precompute_lights(self, **filters):
+      self.precomputed_lights.update(dict([(self.get_light_angles(name), None) for name in self.select_lights(**filters) if name not in self.precomputed_lights]))
+
+  def precompute_sky(self):
+      if self.use_precomputation: 
+        self.precompute_lights(type='SKY')
+
+  def clear_precomputation(self):
+      self.precomputed_lights = {}
+
+  def estimate(self):
       """
       Estimates the irradiance datese scene using the specified method.
 
@@ -109,7 +138,6 @@ class LightEstimator (LightManager):
         result: The computed irradiance result for the scene.
       """
       assert self.scene is not None, "Scene is not set. Please set the scene before estimating irradiance."
-      assert method in lg.available_projection_methods(), f"Method {method} is not available. Available methods are: {lg.available_projection_methods()}"
       precomputedresult = None
       light_values = []
       for light in self.lights.values():
@@ -119,7 +147,7 @@ class LightEstimator (LightManager):
                 if not self.precomputed_lights[lightid] is None:
                     value = self.precomputed_lights[lightid]
                 else:
-                    value = scene_irradiance_from_dir_vectors(self.scene, [(light.direction, 1)], method=method, **args)
+                    value = scene_irradiance_from_dir_vectors(self.scene, [(light.direction, 1)], method=self.method, **self.method_args)
                     self.precomputed_lights[lightid] = value
                 if precomputedresult is None:               
                   precomputedresult = value.copy()
@@ -138,7 +166,7 @@ class LightEstimator (LightManager):
                light_values.append((light.direction, light.irradiance))
       if len(light_values) > 0 :
           print('Compute lights for ',len(light_values),' light sources')
-          self.result = scene_irradiance_from_dir_vectors(self.scene, light_values, method=method, **args)
+          self.result = scene_irradiance_from_dir_vectors(self.scene, light_values, method=self.method, **self.method_args)
           if not precomputedresult is None:
             self.result['irradiance'] += precomputedresult['irradiance']
             if 'interception' in self.result and 'interception' in precomputedresult:
@@ -149,7 +177,7 @@ class LightEstimator (LightManager):
          self.result = precomputedresult
       return self.result
    
-  def __call__(self, method=eZBufferProjection, **args):
+  def __call__(self):
     """
     Allows the instance to be called as a function to estimate lighting using the specified method.
 
@@ -165,7 +193,7 @@ class LightEstimator (LightManager):
     result
       The result of the lighting estimation as returned by the `estimate` method.
     """
-    return self.estimate(method=method, **args)
+    return self.estimate()
   
   def lightrepr(self, minvalue = None, maxvalue = None, scale = 1.5):
     """

@@ -171,11 +171,13 @@ def directionalInterception_zbuffer_from_dir_vectors(scene, directions,
 def directionalInterception_triangleprojection(scene, directions, 
                             north = 0, 
                             horizontal = False,
-                            primitive = eShapeBased):
-   return parallel_directionalInterception_triangleprojection_from_dir_vectors(scene, estimate_dir_vectors(directions, north, horizontal), primitive)
+                            primitive = eShapeBased, 
+                            occludedOnly = None, 
+                            occludingOnly = None):
+   return parallel_directionalInterception_triangleprojection_from_dir_vectors(scene, estimate_dir_vectors(directions, north, horizontal), primitive, occludedOnly, occludingOnly)
 
 def directionalInterception_triangleprojection_from_dir_vectors(scene, directions, 
-                            primitive = eShapeBased):
+                            primitive = eShapeBased, occludedOnly = None, occludingOnly = None):
 
   bbox=pgl.BoundingBox( scene )
   d_factor = max(bbox.getXRange() , bbox.getYRange() , bbox.getZRange())
@@ -191,7 +193,20 @@ def directionalInterception_triangleprojection_from_dir_vectors(scene, direction
     z.setOrthographicCamera(-worldWidth/2., worldWidth/2., -worldheight/2., worldheight/2., d_factor , 3*d_factor)
     eyepos = bbox.getCenter() - dir* d_factor * 2
     z.lookAt(eyepos, bbox.getCenter(), up) 
-    z.process(scene) 
+    if occludedOnly is not None or occludingOnly is not None:
+        occludedOnly = set(occludedOnly) if not occludedOnly is None else set()
+        occludingOnly = set(occludingOnly) if not occludingOnly is None else set()
+        sceneOccluded, sceneOccluding, sceneFullOcclusion = pgl.Scene(), pgl.Scene(), pgl.Scene()
+        for sh in scene:
+            if sh.id in occludedOnly:
+                sceneOccluded.add(sh)
+            if sh.id in occludingOnly:
+                sceneOccluding.add(sh)
+            if sh.id in occludedOnly and sh.id in occludingOnly:
+                sceneFullOcclusion.add(sh)
+        z.mprocess(sceneFullOcclusion, sceneOccluded, sceneOccluding)
+    else:
+        z.process(scene) 
 
     if primitive == eShapeBased :
       values = z.idsurfaces()
@@ -208,7 +223,8 @@ def directionalInterception_triangleprojection_from_dir_vectors(scene, direction
   return shapeLight
 
 def __pditfdv_process_direction(args):
-    dir, wg, path, primitive = args
+    import openalea.plantgl.all as pgl
+    dir, wg, path, primitive, occludedOnly, occludingOnly = args
     scene = pgl.Scene(path)
     bbox=pgl.BoundingBox( scene )
     d_factor = max(bbox.getXRange() , bbox.getYRange() , bbox.getZRange())
@@ -221,7 +237,20 @@ def __pditfdv_process_direction(args):
     z.setOrthographicCamera(-worldWidth/2., worldWidth/2., -worldheight/2., worldheight/2., d_factor , 3*d_factor)
     eyepos = bbox.getCenter() - dir* d_factor * 2
     z.lookAt(eyepos, bbox.getCenter(), up) 
-    z.process(scene) 
+    if occludedOnly is not None or occludingOnly is not None:
+        occludedOnly = set(occludedOnly) if not occludedOnly is None else set()
+        occludingOnly = set(occludingOnly) if not occludingOnly is None else set()
+        sceneOccluded, sceneOccluding, sceneFullOcclusion = pgl.Scene(), pgl.Scene(), pgl.Scene()
+        for sh in scene:
+            if sh.id in occludedOnly:
+                sceneOccluded.add(sh)
+            if sh.id in occludingOnly:
+                sceneOccluding.add(sh)
+            if sh.id in occludedOnly and sh.id in occludingOnly:
+                sceneFullOcclusion.add(sh)
+        z.mprocess(sceneFullOcclusion, sceneOccluded, sceneOccluding)
+    else:
+        z.process(scene) 
     if primitive == eShapeBased :
       values = z.idsurfaces()
     else:
@@ -229,14 +258,14 @@ def __pditfdv_process_direction(args):
     return values
 
 def parallel_directionalInterception_triangleprojection_from_dir_vectors(scene, directions, 
-                            primitive = eShapeBased):
+                            primitive = eShapeBased, occludedOnly = None, occludingOnly = None):
   import os, tempfile
   with tempfile.TemporaryDirectory() as tmp:
     path = os.path.join(tmp, 'tmpscenefile.bgeom')
     scene.save(path)
     import multiprocessing
     with multiprocessing.Pool() as pool:
-      allvalues = pool.map(__pditfdv_process_direction, [(dir, wg, path, primitive) for dir, wg in directions])
+      allvalues = pool.map(__pditfdv_process_direction, [(dir, wg, path, primitive, occludedOnly, occludingOnly) for dir, wg in directions])
 
   from math import nan
   shapeLight = {}
@@ -270,10 +299,13 @@ def directionalInterception_from_dir_vectors(scene, directions,
   elif method == eZBufferProjection:
       return directionalInterception_zbuffer_from_dir_vectors(scene, directions, primitive=primitive, **args)
   elif method == eTriangleProjection:
-      if len(directions) <= 1:
-          return directionalInterception_triangleprojection_from_dir_vectors(scene, directions, primitive=primitive)
+      multithreaded = args.get('multithreaded', True)
+      if 'multithreaded' in args:
+          del args['multithreaded']
+      if len(directions) <= 1 or not multithreaded:
+          return directionalInterception_triangleprojection_from_dir_vectors(scene, directions, primitive=primitive, **args)
       else:
-          return parallel_directionalInterception_triangleprojection_from_dir_vectors(scene, directions, primitive=primitive)
+          return parallel_directionalInterception_triangleprojection_from_dir_vectors(scene, directions, primitive=primitive, **args)
 
 def _format_irradiance(scene, interception, primitive, scene_unit = 'm'):
     try:

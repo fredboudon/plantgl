@@ -493,22 +493,27 @@ Point3MatrixPtr NurbsPatch::deriveAt(real_t  u, real_t  v, int d, int uspan, int
 
 
 Vector3 NurbsPatch::getDerivativeAt(real_t u, real_t v, int du, int dv) const {
-    int d = max(du,dv) ;
-    if (d > min(__udegree,__vdegree)) return Vector3(0,0,0);
+    // Refuse uniquement si l'utilisateur demande un ordre supérieur au degré correspondant
+    if (du > (int)__udegree || dv > (int)__vdegree) return Vector3(0,0,0);
+
+    int d = max(du,dv);
     int uspan = findSpan(u,__udegree,__uKnotList) ;
     int vspan = findSpan(v,__vdegree,__vKnotList) ;
     Point3MatrixPtr ders = deriveAt(u,v,d,uspan,vspan) ;
+
+    // deriveAt retourne une matrice (d+1)x(d+1) et on peut lire la dérivée (du,dv)
     return ders->getAt(du,dv) ;
 }
 
 
+// Remplacement de getDerivativesAt
 Point3MatrixPtr NurbsPatch::getDerivativesAt(real_t u,real_t v) const {
     int uspan = findSpan(u,__udegree,__uKnotList) ;
     int vspan = findSpan(v,__vdegree,__vKnotList) ;
-    int degree = min(__udegree,__vdegree) ;
+    // On demande les dérivées jusqu'au maximum des degrés pour couvrir tout l'espace possible
+    int degree = max((int)__udegree,(int)__vdegree) ;
     return deriveAt(u,v,degree,uspan,vspan) ;
 }
-
 
 
 Vector3 NurbsPatch::getPointAt(real_t u, real_t v) const{

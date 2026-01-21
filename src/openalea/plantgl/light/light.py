@@ -33,19 +33,19 @@ from .utils import azel2vect, estimate_dir_vectors, getProjectionMatrix, project
 # Note: In all these algorithms the plant projection to compute the intercepted surfaces is orthographic
 # and based on a viewport whose resolution is 600x600
 
-def diffuseInterception(scene, ghi, screenresolution = None):
+def diffuseInterception(scene, ghi, resolution = None):
   from .sky import soc_sky_sources
-  return  directionalInterception(scene, directions = soc_sky_sources(ghi), screenresolution = screenresolution)
+  return  directionalInterception(scene, directions = soc_sky_sources(ghi), resolution = resolution)
 
-def directInterception(scene, dates, irradiance, latitude=43.36, longitude=3.52,  screenresolution = None):
+def directInterception(scene, dates, irradiance, latitude=43.36, longitude=3.52,  resolution = None):
   from .sun import sun_sources
-  return  directionalInterception(scene, sun_sources(dates, latitude, longitude, irradiance), screenresolution = screenresolution)
+  return  directionalInterception(scene, sun_sources(dates, latitude, longitude, irradiance), resolution = resolution)
 
-def totalInterception(scene, ghi, dhi, dates, latitude=43.36, longitude=3.52, screenresolution = None):
+def totalInterception(scene, ghi, dhi, dates, latitude=43.36, longitude=3.52, resolution = None):
   from .sky import soc_sky_sources
   from .sun import sun_sources
   directions = soc_sky_sources(dhi) + sun_sources(dates, latitude, longitude, ghi-dhi)
-  return directionalInterception(scene, directions = directions, screenresolution = screenresolution)
+  return directionalInterception(scene, directions = directions, resolution = resolution)
 
 
 eShapeBased, eTriangleBased = range(2)
@@ -108,15 +108,15 @@ def directionalInterception_openGL_from_dir_vectors(scene, directions, screenwid
 def directionalInterception_zbuffer(scene, directions, 
                             north = 0, 
                             horizontal = False, 
-                            screenresolution = None, 
+                            resolution = None, 
                             multithreaded = True,
                             infinitize = None,
                             primitive = eShapeBased):
-   return directionalInterception_zbuffer_from_dir_vectors(scene, estimate_dir_vectors(directions, north, horizontal), screenresolution, multithreaded, infinitize, primitive)
+   return directionalInterception_zbuffer_from_dir_vectors(scene, estimate_dir_vectors(directions, north, horizontal), resolution, multithreaded, infinitize, primitive)
 
 
 def directionalInterception_zbuffer_from_dir_vectors(scene, directions, 
-                            screenresolution = None, 
+                            resolution = None, 
                             multithreaded = True,
                             infinitize = None,
                             primitive = eShapeBased):
@@ -125,9 +125,9 @@ def directionalInterception_zbuffer_from_dir_vectors(scene, directions,
   bbox=pgl.BoundingBox( scene )
   d_factor = max(bbox.getXRange() , bbox.getYRange() , bbox.getZRange())
   shapeLight = {}
-  if screenresolution is None:
-    screenresolution = d_factor/100
-  pixsize = screenresolution*screenresolution
+  if resolution is None:
+    resolution = d_factor/100
+  pixsize = resolution*resolution
 
   for dir, wg in directions:
     dir = pgl.Vector3(dir)
@@ -135,10 +135,10 @@ def directionalInterception_zbuffer_from_dir_vectors(scene, directions,
     pjbbx = projectedBBox(bbox, dir, up)
     worldWidth = pjbbx.getXRange()
     worldheight = pjbbx.getYRange()
-    w, h = max(2,int(ceil(worldWidth/screenresolution))+1), max(2,int(ceil(worldheight/screenresolution))+1)
+    w, h = max(2,int(ceil(worldWidth/resolution))+1), max(2,int(ceil(worldheight/resolution))+1)
 
-    worldWidth = w * screenresolution
-    worldheight = h * screenresolution
+    worldWidth = w * resolution
+    worldheight = h * resolution
     z = pgl.ZBufferEngine(w, h, renderingStyle=pgl.eIdBased, idPolicy=pgl.ePrimitiveIdBased if primitive == eTriangleBased else pgl.eShapeIdBased)
     z.multithreaded = multithreaded
     z.setOrthographicCamera(-worldWidth/2., worldWidth/2., -worldheight/2., worldheight/2., d_factor , 3*d_factor)
@@ -224,8 +224,8 @@ def directionalInterception_triangleprojection_from_dir_vectors(scene, direction
 
 def __pditfdv_process_direction(args):
     import openalea.plantgl.all as pgl
-    dir, wg, path, primitive, occludedOnly, occludingOnly = args
-    scene = pgl.Scene(path)
+    dir, wg, data, primitive, occludedOnly, occludingOnly = args
+    scene = pgl.frombinarystring(data)
     bbox=pgl.BoundingBox( scene )
     d_factor = max(bbox.getXRange() , bbox.getYRange() , bbox.getZRange())
     dir = pgl.Vector3(dir)
@@ -259,13 +259,9 @@ def __pditfdv_process_direction(args):
 
 def parallel_directionalInterception_triangleprojection_from_dir_vectors(scene, directions, 
                             primitive = eShapeBased, occludedOnly = None, occludingOnly = None):
-  import os, tempfile
-  with tempfile.TemporaryDirectory() as tmp:
-    path = os.path.join(tmp, 'tmpscenefile.bgeom')
-    scene.save(path)
-    import multiprocessing
-    with multiprocessing.Pool() as pool:
-      allvalues = pool.map(__pditfdv_process_direction, [(dir, wg, path, primitive, occludedOnly, occludingOnly) for dir, wg in directions])
+  import multiprocessing
+  with multiprocessing.Pool() as pool:
+      allvalues = pool.map(__pditfdv_process_direction, [(dir, wg, pgl.tobinarystring(scene), primitive, occludedOnly, occludingOnly) for dir, wg in directions])
 
   from math import nan
   shapeLight = {}

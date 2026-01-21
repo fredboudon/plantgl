@@ -2,6 +2,19 @@ from . import light as lg
 from .utils import get_timezone, estimate_dir_vectors, vect2azel
 from .light import scene_irradiance_from_dir_vectors, eZBufferProjection
 from .lightmanager import LightManager
+from openalea.plantgl.algo import tobinarystring, frombinarystring
+
+def __li_process_cached_light(args):
+      scene, light_list, method, method_args = args
+      scene = frombinarystring(scene)
+      return scene_irradiance_from_dir_vectors(scene, light_list, method=method, **method_args)
+
+def li_process_cached_lights__(scene, precomputed_light_values, method, method_args):
+      import multiprocessing
+      sc = tobinarystring(scene)
+      with multiprocessing.Pool() as pool:
+          allvalues = pool.map(__li_process_cached_light, [(sc, [(lightdirection, 1)], method, method_args) for lightid, lightdirection, irradiance in precomputed_light_values])
+      return allvalues
 
 class LightEstimator (LightManager):
   """
@@ -99,7 +112,7 @@ class LightEstimator (LightManager):
     """
     self.scene = scene
     self.north = north
-    self.precomputed_lights = dict(zip(self.precompute_lights.keys(), [None for i in range(len(self.precomputed_lights))]))
+    self.invalidate_precomputation()
     return self
   
   def set_method(self, method, **args):
@@ -112,20 +125,47 @@ class LightEstimator (LightManager):
       """
       assert method in lg.available_projection_methods(), f"Method {method} is not available. Available methods are: {lg.available_projection_methods()}"
       if method != self.method or args != self.method_args:
-         self.clear_precomputation()
+         self.invalidate_precomputation()
       self.method = method
       self.method_args = args
+      return self
 
   def precompute_lights(self, **filters):
-      self.precomputed_lights.update(dict([(self.get_light_angles(name), None) for name in self.select_lights(**filters) if name not in self.precomputed_lights]))
+      self.precomputed_lights.update(dict([(self.getlightid(name), None) for name in self.select_lights(**filters) if self.getlightid(name) not in self.precomputed_lights]))
 
   def precompute_sky(self):
       if self.use_precomputation: 
         self.precompute_lights(type='SKY')
 
+  def invalidate_precomputation(self):
+      """
+      Invalidate all precomputed light values by setting them to None.
+      
+      This method resets the precomputed_lights dictionary by replacing all values
+      with None while preserving the original keys. This is useful when light
+      parameters change and precomputed values need to be recalculated.
+      """
+      self.precomputed_lights = dict(zip(self.precomputed_lights.keys(), [None for i in range(len(self.precomputed_lights))]))
+  
   def clear_precomputation(self):
-      self.precomputed_lights = {}
+      """
+      Clear all precomputed light data.
 
+      This method removes all cached light computations stored in the precomputed_lights
+      dictionary, allowing for fresh computation on the next request.
+      Light value to consider for precomputation should be added back before calling estimate().
+      """
+      self.precomputed_lights = {}
+  
+  def getlightid(self, name):
+      az, el = self.get_light_angles(name)
+      resolution = 5
+      factor = 10 ** resolution
+      azf = az*factor
+      elf = el*factor
+      roundedid = int(azf) * 1000*factor + int(elf)
+      return roundedid
+  
   def estimate(self):
       """
       Estimates the irradiance datese scene using the specified method.
@@ -138,32 +178,55 @@ class LightEstimator (LightManager):
         result: The computed irradiance result for the scene.
       """
       assert self.scene is not None, "Scene is not set. Please set the scene before estimating irradiance."
-      precomputedresult = None
       light_values = []
+      precomputed_light_values = []
+      # extraction of light values
       for light in self.lights.values():
          if light.enabled:
-            lightid = self.get_light_angles(light.name)
+            lightid = self.getlightid(light.name)
             if lightid in self.precomputed_lights:
-                if not self.precomputed_lights[lightid] is None:
-                    value = self.precomputed_lights[lightid]
-                else:
-                    value = scene_irradiance_from_dir_vectors(self.scene, [(light.direction, 1)], method=self.method, **self.method_args)
-                    self.precomputed_lights[lightid] = value
-                if precomputedresult is None:               
-                  precomputedresult = value.copy()
-                  precomputedresult['irradiance'] *= light.irradiance
-                  if 'interception' in precomputedresult:
-                    precomputedresult['interception'] *= light.irradiance
-                  if 'absorbance' in precomputedresult:
-                    precomputedresult['absorbance'] *= light.irradiance
-                else:
-                  precomputedresult['irradiance'] += value['irradiance']*light.irradiance
-                  if 'interception' in precomputedresult:
-                    precomputedresult['interception'] += value['interception']*light.irradiance
-                  if 'absorbance' in precomputedresult:
-                    precomputedresult['absorbance'] += value['absorbance']*light.irradiance
+               precomputed_light_values.append((lightid, light.direction, light.irradiance))
             else:
                light_values.append((light.direction, light.irradiance))
+      
+      precomputedresult = None
+      if len(precomputed_light_values) > 0 :
+        # precomputation of lights
+        toprecompute = [(lightid, lightdirection, irradiance) for lightid, lightdirection, irradiance in precomputed_light_values if self.precomputed_lights[lightid] is None]
+        if len(toprecompute) > 0:
+          print('Precompute lights for ',len(toprecompute),' light sources')
+          multithreaded = self.method_args.get('multithreaded', True)
+          if not multithreaded:
+            for lightid, lightdirection, irradiance in toprecompute:
+                if  self.precomputed_lights[lightid] is None:
+                    value = scene_irradiance_from_dir_vectors(self.scene, [(lightdirection, 1)], method=self.method, **self.method_args)
+                    self.precomputed_lights[lightid] = value
+          else:
+              # use of multiprocessing for precomputation
+              allvalues = li_process_cached_lights__(self.scene, toprecompute, self.method, self.method_args)
+
+              for (lightid, lightdirection, irradiance), value in zip(toprecompute, allvalues):
+                    self.precomputed_lights[lightid] = value
+
+        # use of precomputed lights
+        for lightid, lightdirection, irradiance in precomputed_light_values:
+                  value = self.precomputed_lights[lightid]
+                  assert not value is None, "Precomputed light value should not be None"
+                  if precomputedresult is None:               
+                    precomputedresult = value.copy()
+                    precomputedresult['irradiance'] *= irradiance
+                    if 'interception' in precomputedresult:
+                      precomputedresult['interception'] *= irradiance
+                    if 'absorbance' in precomputedresult:
+                      precomputedresult['absorbance'] *= irradiance
+                  else:
+                    precomputedresult['irradiance'] += value['irradiance']*irradiance
+                    if 'interception' in precomputedresult:
+                      precomputedresult['interception'] += value['interception']*irradiance
+                    if 'absorbance' in precomputedresult:
+                      precomputedresult['absorbance'] += value['absorbance']*irradiance
+
+      # compute remaining lights
       if len(light_values) > 0 :
           print('Compute lights for ',len(light_values),' light sources')
           self.result = scene_irradiance_from_dir_vectors(self.scene, light_values, method=self.method, **self.method_args)

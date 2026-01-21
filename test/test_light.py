@@ -8,7 +8,7 @@ def test_triangle():
     triangles = Scene([Shape(TriangleSet(points, [list(range(3))]),id=8)])
 
     lights = [(0,0,1)]
-    res = scene_irradiance(triangles, lights, screenresolution=0.0005)
+    res = scene_irradiance(triangles, lights, resolution=0.0005)
     print(res)
 
 

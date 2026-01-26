@@ -1,4 +1,4 @@
-name: plantgl-devel-sbc
+name: plantgl-devel
 channels:
     - conda-forge
     - openalea3
@@ -29,3 +29,7 @@ dependencies:
     - flex
     - scipy
     - matplotlib-base
+    - libgl [linux]
+    - libgl-devel [linux]
+    - libglx [linux]
+    - libglu [linux]

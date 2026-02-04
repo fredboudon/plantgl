@@ -239,10 +239,6 @@ class LightEstimator (LightManager):
       precomputedresult = None
       if len(precomputed_light_values) > 0 :
         # precomputation of lights
-        #print(list(sorted([lightid for lightid, lightdirection, irradiance in precomputed_light_values])))
-        #print(list(sorted(self.precomputed_lights.keys())))
-        #print(list(sorted([lightid for lightid, value in self.precomputed_lights.items() if value is None])))
-        print(list(sorted([lightid for lightid, lightdirection, irradiance in precomputed_light_values if self.precomputed_lights[lightid] is None])))
         toprecompute = [(lightid, lightdirection, irradiance) for lightid, lightdirection, irradiance in precomputed_light_values if self.precomputed_lights[lightid] is None]
         if len(toprecompute) > 0:
           print('Precompute lights for ',len(toprecompute),' light sources')

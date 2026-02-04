@@ -1,7 +1,7 @@
 from . import light as lg
 from .utils import get_timezone, estimate_dir_vectors, vect2azel
 from .light import scene_irradiance_from_dir_vectors, eZBufferProjection
-from .lightmanager import LightManager
+from .lightmanager import LightManager, to_clockwise
 from openalea.plantgl.algo import tobinarystring, frombinarystring
 
 def __li_process_cached_light(args):
@@ -84,9 +84,20 @@ class LightEstimator (LightManager):
   """
   
   def __init__(self, scene = None, north = 90, use_precomputation = True):
-      super().__init__()
+      """
+      Create a LightEstimator
+
+      Parameters
+      ----------
+      scene : object
+          The scene object to be used for light estimation.
+      north : float
+          The angle between the north direction and +X axis (in degrees-positive counter clockwise). Default is 90.
+      use_precomputation : bool
+          If the object uses precomputation for defined direction
+      """
+      super().__init__(north=north)
       self.scene = scene
-      self.north = north
       self.sensors = {}
       self.method = eZBufferProjection
       self.method_args = {}
@@ -133,6 +144,15 @@ class LightEstimator (LightManager):
   def precompute_lights(self, **filters):
       self.precomputed_lights.update(dict([(self.getlightid(name), None) for name in self.select_lights(**filters) if self.getlightid(name) not in self.precomputed_lights]))
 
+  def always_precompute(self):
+      self.use_precomputation = 2
+
+  def _ligthAddedEvent(self, name):
+      if self.use_precomputation == 2:
+         if self.getlightid(name) not in self.precomputed_lights:
+            print('initiate cache for', name,':', self.getlightid(name))
+            self.precomputed_lights[self.getlightid(name)] = None
+
   def precompute_sky(self):
       if self.use_precomputation: 
         self.precompute_lights(type='SKY')
@@ -146,7 +166,34 @@ class LightEstimator (LightManager):
       parameters change and precomputed values need to be recalculated.
       """
       self.precomputed_lights = dict(zip(self.precomputed_lights.keys(), [None for i in range(len(self.precomputed_lights))]))
-  
+
+  def dump_precomputation(self, outdir = '.pglcache'):
+      import os
+      if not os.path.exists(outdir):
+        os.mkdir(outdir)
+      for key, value in self.precomputed_lights.items():
+         cachefname = str(key)+'.pkl'
+         if not value is None and not os.path.exists(cachefname):
+            value.to_pickle(os.path.join(outdir,cachefname))
+
+  def load_precomputation(self, outdir = '.pglcache'):
+      """
+      load_precomputation
+      
+      :warning: TO BE USED after set_method
+
+      :param outdir: the directory in which storing precomputation data
+      """
+      import os, pandas
+      if not os.path.exists(outdir):
+         return
+      for fname in os.listdir(outdir):
+         key, ext = os.path.splitext(fname)
+         if ext == '.pkl':
+            key = int(key)
+            if not key in self.precomputed_lights or self.precomputed_lights[key] is None:
+                self.precomputed_lights[key] = pandas.read_pickle(os.path.join(outdir,fname))
+
   def clear_precomputation(self):
       """
       Clear all precomputed light data.
@@ -192,6 +239,10 @@ class LightEstimator (LightManager):
       precomputedresult = None
       if len(precomputed_light_values) > 0 :
         # precomputation of lights
+        #print(list(sorted([lightid for lightid, lightdirection, irradiance in precomputed_light_values])))
+        #print(list(sorted(self.precomputed_lights.keys())))
+        #print(list(sorted([lightid for lightid, value in self.precomputed_lights.items() if value is None])))
+        print(list(sorted([lightid for lightid, lightdirection, irradiance in precomputed_light_values if self.precomputed_lights[lightid] is None])))
         toprecompute = [(lightid, lightdirection, irradiance) for lightid, lightdirection, irradiance in precomputed_light_values if self.precomputed_lights[lightid] is None]
         if len(toprecompute) > 0:
           print('Precompute lights for ',len(toprecompute),' light sources')
@@ -229,13 +280,18 @@ class LightEstimator (LightManager):
       # compute remaining lights
       if len(light_values) > 0 :
           print('Compute lights for ',len(light_values),' light sources')
+          import time
+          t = time.time()
           self.result = scene_irradiance_from_dir_vectors(self.scene, light_values, method=self.method, **self.method_args)
+          print('Done in',time.time()-t,"sec")
           if not precomputedresult is None:
+            t = time.time()
             self.result['irradiance'] += precomputedresult['irradiance']
             if 'interception' in self.result and 'interception' in precomputedresult:
               self.result['interception'] += precomputedresult['interception']
             if 'absorbance' in self.result and 'absorbance' in precomputedresult:
               self.result['absorbance'] += precomputedresult['absorbance']
+            print('Assembling results in',time.time()-t,"sec")
       else:
          self.result = precomputedresult
       return self.result
@@ -363,8 +419,8 @@ class LightEstimator (LightManager):
     if self.scene is None:
        sc, cmap = self.lightrepr(minval, maxval)
     else:
-      assert hasattr(self, 'result') or hasattr(self, 'sensors_result'), "No result to plot. Please run estimate() or estimate_sensors() first."
 
+      sc = sg.Scene()
       if hasattr(self, 'result'):
         assert a_property in self.result, f"Property '{a_property}' not found in results."
 
@@ -374,10 +430,17 @@ class LightEstimator (LightManager):
             min_value = min(self.result[a_property])
             if hasattr(self, 'sensors_result') and a_property == 'irradiance':
                 min_value = min(min(self.sensors_result.values()), min_value)
-        elif a_property == 'irradiance':
-            min_value = min(self.sensors_result.values())
+        elif a_property == 'irradiance'and  hasattr(self, 'sensors_result'):
+                min_value = min(self.sensors_result.values())
+        else:
+           min_value = None
+
         if lightrepscale is not None and a_property == 'irradiance':
-            min_value = min(min_value, min(self.lights.values(), key=lambda x: x.irradiance).irradiance)
+            minv = min(self.lights.values(), key=lambda x: x.irradiance).irradiance
+            if not min_value is None:
+              min_value = min(min_value, minv)
+            else:
+               min_value = minv
       else:
           min_value = minval
       if maxval is None:
@@ -385,14 +448,20 @@ class LightEstimator (LightManager):
             max_value = max(self.result[a_property])
             if hasattr(self, 'sensors_result') and a_property == 'irradiance':
                 max_value = max(max(self.sensors_result.values()), max_value)
-        elif a_property == 'irradiance':
-            max_value = max(self.sensors_result.values())
+        elif a_property == 'irradiance' and hasattr(self, 'sensors_result'):
+              max_value = max(self.sensors_result.values())
+        else:
+           max_value = None
+
         if lightrepscale is not None and a_property == 'irradiance':
-            max_value = max(max_value, max(self.lights.values(), key=lambda x: x.irradiance).irradiance)
+            maxv = max(self.lights.values(), key=lambda x: x.irradiance).irradiance
+            if not max_value is None:
+              max_value = max(max_value, maxv)
+            else:
+               max_value = maxv
       else:
           max_value = maxval
 
-      sc = sg.Scene()
       if hasattr(self, 'result'):
           sc, cmap = self.scenerepr(a_property, min_value, max_value)
       else:
@@ -433,7 +502,12 @@ class LightEstimator (LightManager):
       mask = PonctualVisibilityMask(self.scene, position, direction, up, view_angle, angular_resolution)
       self.sensors[id] = mask
       return self
-  
+
+  def clear_sensors(self):
+     self.sensors = {}
+     self.sensors_result = {}
+     return self
+
   def estimate_sensors(self):
       """
       Estimate the irradiance at the sensor positions using the visibility masks.
@@ -543,11 +617,21 @@ class LightEstimator (LightManager):
         maxval = max(self.sensors_result.values())
       from openalea.plantgl.scenegraph.colormap import PglMaterialMap
       cmap  = PglMaterialMap(minval, maxval)
+      shapefunc = shapes[format]
 
       for sid, irr in self.sensors_result.items():
           sensor = self.sensors[sid]
           pos = sensor.position
           dir = sensor.direction
           up = sensor.up
-          sc.add(sg.Shape(sg.Translated(pos, sg.Oriented(mt.cross(dir, up), up, shapes[format](size))), cmap(irr), id=sid))
+          shape = shapefunc(size)
+          mat = cmap(irr)
+          geom = sg.Translated(pos, sg.Oriented(mt.cross(dir, up), up, shape))
+          assert geom.isValid(), "Generated geometry is not valid."
+          sh = sg.Shape()
+          sh.geometry = geom
+          sh.material = mat
+          if (type(sid) is str and sid.isdigit()) or (type(sid) is int):
+              sh.id = int(sid)
+          sc.add(sh)
       return sc, cmap

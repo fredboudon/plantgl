@@ -28,9 +28,10 @@ class LightManager:
     It also provides methods to compute irradiance on surfaces given the light setup.
   """
 
-  def __init__(self):
+  def __init__(self, north = 90):
       self.lights = {}
       self.localization = None
+      self.north = north
       self.localize_to_city("Montpellier")
 
   def clear_lights(self):
@@ -176,7 +177,7 @@ class LightManager:
     elevation : float
         The elevation angle of the light in degrees.
     azimuth : float
-        The azimuth angle of the light in degrees.
+        The azimuth angle of the light in degrees (clock-wize)
     irradiance : float
         The irradiance of the light.
     horizontal : bool, optional
@@ -194,6 +195,7 @@ class LightManager:
         from math import radians, sin
         irradiance = to_normal_irradiance(irradiance, elevation)
     self.lights[name] = Light(name, elevation, azimuth, dir, irradiance, **kwdargs)
+    self._ligthAddedEvent(name)
     return self
  
   def add_lights_from_vectors(self, lights):
@@ -217,9 +219,12 @@ class LightManager:
             dir, irradiance = params
         if irradiance > 0:
             self.lights[name] = Light(name, *vect2azel(dir), dir, irradiance, *tags)
+            self._ligthAddedEvent(name)
     return self
   
-
+  def _ligthAddedEvent(self, name):
+     pass
+  
   def add_lights(self, directions, horizontal = False):
     """
     Set lights based on specified directions.
@@ -285,7 +290,11 @@ class LightManager:
     if date.tzinfo is None:
           date = date.tz_localize(self.localization['timezone'])
     return date
-    
+
+  def add_zenith(self, irradiance = 1) :
+    self.add_light("zenith", 90, 0, irradiance, horizontal=False, type='ZENITH')
+    return self
+  
   def add_sun(self, dates = None,  irradiance = 1) :
       """
         Adds sunlight sources to the scene based on specified dates and geographic location.
@@ -809,80 +818,21 @@ class LightManager:
     - The implementation uses a simple distance-based weighting for interpolation (3 nearest neighbors).
     - The radial mapping choices are provided to support either area-preserving-like ('sin') or linear ('flat') visualizations.
      """
-     assert len(self.lights) > 0, "No lights to plot. Please add lights first."
-     assert background in [None, 'interpolated', 'closest'], "Background must be None, 'interpolated' or 'closest'."
-     assert projection in ['sin', 'flat'], "Projection must be 'sin' or 'flat'."
-     assert irradiance in ['horizontal', 'direct'], "Irradiance must be 'horizontal' or 'direct'."
+     from .utils import plot_sky
      import matplotlib.pyplot as plt
-     from math import radians, degrees
-     import openalea.plantgl.math as mt
-     from .utils import azel2vect
      import numpy as np
-     if polar:
-        fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
-        ax.set_theta_offset(radians(self.north))
-        ax.set_theta_direction(-1) # clockwise
-     else:
-        fig, ax = plt.subplots()
-
-     azimuths, zeniths, values = zip(*[ (light.azimuth, 90-light.elevation, light.irradiance)  for light in self.lights.values()])
-     azimuths = np.array(azimuths)
-     zeniths = np.array(zeniths)
-     values = np.array(values)
-     
+     assert len(self.lights) > 0, "No lights to plot. Please add lights first."
+     azimuths = [l.azimuth for l in self.lights.values()]
+     elevations = [l.elevation for l in self.lights.values()]
+     values = [l.irradiance for l in self.lights.values()]
      if irradiance == 'horizontal': 
-        values = [v*np.cos( np.radians(z)) if z != 90 else v/1e-6 for z,v in zip(zeniths, values)]
+        values = [v*np.sin( np.radians(el)) if el != 0 else v/1e-6 for el,v in zip(elevations, values)]
 
-     def projection_transform(el):
-        if projection == 'sin':
-            el = np.sin( np.radians(el) )
-        else:
-            el = el/90.0
-        return el
-     
-     if background is not None:
-        from openalea.plantgl.algo import ANNKDTree2
-        from openalea.plantgl.math import norm
-        refpoints = [light.direction for light in self.lights.values()]
-        refpoints2d = [mt.Vector2(vect.x, vect.y) for vect in refpoints]
+     fig, ax = plot_sky(azimuths, elevations, values,
+              bgresolution=bgresolution, polar =polar, projection =projection, 
+              north = self.north, colorbarlabel = 'Direct Irradiance' if irradiance == 'direct' else 'Horizontal Irradiance', 
+              elevationticks = True)
 
-        kdtree = ANNKDTree2(refpoints2d)
-
-        if background == 'interpolated':
-          pX = np.sort(np.unique(azimuths))
-          if pX[0] > -180:
-            pX = np.concatenate( (np.array([-180]), pX) )
-          if pX[-1] < 180:
-            pX = np.concatenate( (pX, np.array([180]) ) )
-          
-          pY = np.sort(np.unique(zeniths))
-          if pY[0] > 0:
-            pY = np.concatenate( (np.array([0]), pY) )
-          if pY[-1] < 90:
-            pY = np.concatenate( (pY, np.array([90]) ) )
-        else:
-          pX = np.arange(-180,181,bgresolution)
-          pY = np.arange(0,91,bgresolution)
-
-        pV = np.zeros( (len(pX), len(pY)) )
-        for i, az in enumerate(pX ):
-              for j, zen in enumerate(pY):
-                    pt = azel2vect(az, 90-zen)
-                    pt2 =mt.Vector2(pt.x, pt.y)
-                    idx = kdtree.k_closest_points( pt2, 1 )[0]
-                    pV[i,j] = values[idx]
-        ax.pcolormesh( np.radians(pX-self.north) , projection_transform(pY), pV.T,  shading = 'gouraud', edgecolors=None, cmap=cmap)
-    
-     scat = ax.scatter( np.radians(azimuths), projection_transform(np.array(zeniths)), s=50, edgecolors='black', c=values,  cmap=cmap)
-     ticks = np.arange(0,91,30)
-     ax.set_yticks(projection_transform(ticks), labels=[str(90-yt) for yt in ticks])
-     xticks = np.arange(0,361,45)
-     def toDir(v):
-        return {0:'N (0°)', 45:'NE', 90:'E\n90°', 135:'SE', 180:'S (180°)', 225:'SW', 270:'W\n270°', 315:'NW', 360:'N (0°)'}[v]
-     ax.set_xticks(np.radians(xticks), labels=[toDir(xt) for xt in xticks])
-     ax.set_xlabel('Azimuth')
-     ax.set_ylabel('Elevation (degrees)', labelpad=40)
-     fig.colorbar(scat, label='Direct Irradiance' if irradiance == 'direct' else 'Horizontal Irradiance', pad=0.1)
      if not self.localization_name is None :
         ax.set_title(self.localization_name)
      else:

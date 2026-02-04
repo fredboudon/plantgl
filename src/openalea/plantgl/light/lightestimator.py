@@ -150,7 +150,6 @@ class LightEstimator (LightManager):
   def _ligthAddedEvent(self, name):
       if self.use_precomputation == 2:
          if self.getlightid(name) not in self.precomputed_lights:
-            print('initiate cache for', name,':', self.getlightid(name))
             self.precomputed_lights[self.getlightid(name)] = None
 
   def precompute_sky(self):

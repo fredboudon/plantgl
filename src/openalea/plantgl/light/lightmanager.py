@@ -1,4 +1,4 @@
-from .utils import estimate_dir_vectors, vect2azel, azel2vect, to_horizontal_irradiance, to_normal_irradiance
+from .utils import estimate_dir_vectors, vect2azel, vect2elaz, azel2vect, to_horizontal_irradiance, to_normal_irradiance
 import pandas as pd
 import datetime
 
@@ -28,7 +28,7 @@ class LightManager:
     It also provides methods to compute irradiance on surfaces given the light setup.
   """
 
-  def __init__(self, north = 90):
+  def __init__(self, north = -90):
       self.lights = {}
       self.localization = None
       self.north = north
@@ -192,12 +192,33 @@ class LightManager:
         return self
     dir = azel2vect(azimuth, elevation, self.north)
     if horizontal :
-        from math import radians, sin
         irradiance = to_normal_irradiance(irradiance, elevation)
     self.lights[name] = Light(name, elevation, azimuth, dir, irradiance, **kwdargs)
     self._ligthAddedEvent(name)
     return self
- 
+
+  def add_light_from_vector(self, name, dir, irradiance, horizontal = False, **kwdargs):
+    """
+    Add a single light to the estimator.
+
+    Parameters
+    ----------
+    dir : Vector3
+        The direction vector of the light.
+    irradiance : float
+        The irradiance of the light.
+    horizontal : bool, optional
+        If True, the irradiance is adjusted for horizontal irradiance. Default is False.
+    """
+    if irradiance <= 0:
+        return self
+    azimuth, elevation = vect2azel(dir, self.north)
+    if horizontal :
+        irradiance = to_normal_irradiance(irradiance, elevation)
+    self.lights[name] = Light(name, elevation, azimuth, dir, irradiance, **kwdargs)
+    self._ligthAddedEvent(name)
+    return self
+   
   def add_lights_from_vectors(self, lights):
     """
     Add a set of lights to the estimator.
@@ -218,7 +239,7 @@ class LightManager:
             name = f"light_{len(self.lights)}"
             dir, irradiance = params
         if irradiance > 0:
-            self.lights[name] = Light(name, *vect2azel(dir), dir, irradiance, *tags)
+            self.lights[name] = Light(name, *vect2elaz(dir, self.north), dir, irradiance, *tags)
             self._ligthAddedEvent(name)
     return self
   
@@ -409,48 +430,6 @@ class LightManager:
       self.add_sky(dhi)
       return self
 
-  def estimate_astk_sky_irradiance(self, dates = None, attenuation = None):
-      """
-      Estimate clear sky irradiance of a clear sky at a given location and date(s).
-      This method uses the ASTK (Astronomical ToolKit) package to compute sky irradiance.
-      
-      Parameters
-      ----------
-      dates : datetime.datetime or list of datetime.datetime, optional
-        Date(s) for which to estimate sky irradiance. If None, uses today's date.
-      attenuation : float between 0 and 1, optional
-        Optional attenuation coefficient(s) applied to the computed irradiance.
-        If None, the default behavior of the underlying ASTK function is used.
-        The estimated sky irradiance in W/m². Returns a scalar when a single date
-        is provided, or an array with one value per input date when multiple dates
-        are provided.
-      Returns
-      -------
-      float or numpy.ndarray
-        The estimated sky irradiance (W/m²) for the given date(s) and location.
-        Returns a single float if one date is provided, or an array for multiple dates.
-      Raises
-      ------
-      ImportError
-        If the required ASTK package is not installed.
-      Notes
-      -----
-      The location parameters (latitude, longitude, altitude, timezone) are taken 
-      from the object's localization attribute.
-      """
-
-      try:
-          from openalea.astk.sky_irradiance import sky_irradiance
-
-          dates = self._check_daydate(dates)
-          return sky_irradiance(daydate=dates,
-                                attenuation=attenuation,
-                                **self.localization)
-      except ImportError:
-          import warnings
-          warnings.warn("ASTK is required for estimate_astk_sky_irradiance. Please install openalea.astk. Using add_sun_sky_from_irradiances instead.")
-          return self.estimate_sky_irradiance(dates, attenuation)
-
   def estimate_sky_irradiance(self, dates = None, attenuation = None):
       """
       Estimate clear sky irradiance of a clear sky at a given location and date(s).
@@ -524,13 +503,56 @@ class LightManager:
          sky_discretization = [ 1, 6, 16, 26, 46, 66, 91, 136, 196, 251, 341, 406, 556, 751, 976][sky_subdivision]
          sun, sky = sky_sources(sky_type=sky_type, sky_irradiance=irradiances, sky_dirs = sky_turtle(sky_discretization), scale="ghi", north = 0)
          self.add_lights([(f"sky_{i}",el, to_clockwise(az), irr, {'type': 'SKY'}) for i, (el, az, irr) in enumerate(sky)], horizontal=True)
-         for date,(el,az,irr) in zip(sun, irradiances.index):
+         for date,(el,az,irr) in zip(irradiances.index, sun):
             self.add_light(f"sun_{date.strftime('%Y%m%d_%H%M')}", el, to_clockwise(az), irr, horizontal=True, date=date, type='SUN')
       except ImportError:
           import warnings
           warnings.warn("ASTK is required for add_astk_sun_sky. Please install openalea.astk. Using add_sun_sky_from_irradiances instead.")
           return self.add_sun_sky_from_irradiances(irradiances)
       return self
+  
+  def estimate_astk_sky_irradiance(self, dates = None, attenuation = None):
+      """
+      Estimate clear sky irradiance of a clear sky at a given location and date(s).
+      This method uses the ASTK (Astronomical ToolKit) package to compute sky irradiance.
+      
+      Parameters
+      ----------
+      dates : datetime.datetime or list of datetime.datetime, optional
+        Date(s) for which to estimate sky irradiance. If None, uses today's date.
+      attenuation : float between 0 and 1, optional
+        Optional attenuation coefficient(s) applied to the computed irradiance.
+        If None, the default behavior of the underlying ASTK function is used.
+        The estimated sky irradiance in W/m². Returns a scalar when a single date
+        is provided, or an array with one value per input date when multiple dates
+        are provided.
+      Returns
+      -------
+      float or numpy.ndarray
+        The estimated sky irradiance (W/m²) for the given date(s) and location.
+        Returns a single float if one date is provided, or an array for multiple dates.
+      Raises
+      ------
+      ImportError
+        If the required ASTK package is not installed.
+      Notes
+      -----
+      The location parameters (latitude, longitude, altitude, timezone) are taken 
+      from the object's localization attribute.
+      """
+
+      try:
+          from openalea.astk.sky_irradiance import sky_irradiance
+
+          dates = self._check_daydate(dates)
+          return sky_irradiance(daydate=dates,
+                                attenuation=attenuation,
+                                **self.localization)
+      except ImportError:
+          import warnings
+          warnings.warn("ASTK is required for estimate_astk_sky_irradiance. Please install openalea.astk. Using add_sun_sky_from_irradiances instead.")
+          return self.estimate_sky_irradiance(dates, attenuation)
+
 
   def add_sun_sky_from_irradiances(self, irradiances):
       """
@@ -829,7 +851,7 @@ class LightManager:
         values = [v*np.sin( np.radians(el)) if el != 0 else v/1e-6 for el,v in zip(elevations, values)]
 
      fig, ax = plot_sky(azimuths, elevations, values,
-              bgresolution=bgresolution, polar =polar, projection =projection, 
+              bgresolution=bgresolution, representation = 'polar' if polar else 'angle', projection =projection, 
               north = self.north, colorbarlabel = 'Direct Irradiance' if irradiance == 'direct' else 'Horizontal Irradiance', 
               elevationticks = True)
 

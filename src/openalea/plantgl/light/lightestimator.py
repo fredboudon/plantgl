@@ -83,7 +83,7 @@ class LightEstimator (LightManager):
     heavy; sampling resolution and number of lights should be tuned for interactive use.
   """
   
-  def __init__(self, scene = None, north = 90, use_precomputation = True):
+  def __init__(self, scene = None, north = -90, use_precomputation = True):
       """
       Create a LightEstimator
 
@@ -105,7 +105,7 @@ class LightEstimator (LightManager):
       self.precomputed_lights = {}
 
 
-  def set_scene(self, scene, north = 90):
+  def set_scene(self, scene, north = -90):
     """
     Set the scene and north orientation for the estimator.
 
@@ -171,11 +171,11 @@ class LightEstimator (LightManager):
       if not os.path.exists(outdir):
         os.mkdir(outdir)
       for key, value in self.precomputed_lights.items():
-         cachefname = str(key)+'.pkl'
-         if not value is None and not os.path.exists(cachefname):
-            value.to_pickle(os.path.join(outdir,cachefname))
+         cachefname = os.path.join(outdir,str(key)+'.pkl')
+         if not value is None and not isinstance(value, str) and not os.path.exists(cachefname):
+            value.to_pickle(cachefname)
 
-  def load_precomputation(self, outdir = '.pglcache'):
+  def load_precomputation(self, outdir = '.pglcache', true_load = False):
       """
       load_precomputation
       
@@ -191,7 +191,27 @@ class LightEstimator (LightManager):
          if ext == '.pkl':
             key = int(key)
             if not key in self.precomputed_lights or self.precomputed_lights[key] is None:
-                self.precomputed_lights[key] = pandas.read_pickle(os.path.join(outdir,fname))
+                fullname = os.path.join(outdir,fname)
+                try:
+                  self.precomputed_lights[key] = pandas.read_pickle(fullname) if true_load else fullname
+                except Exception:
+                    print('Error loading precomputation for light id', key, 'from file', fname)
+                    os.remove(os.path.join(outdir,fname))
+                    pass
+  
+  def _get_precomputation(self, lightid):
+      if lightid in self.precomputed_lights:
+         if type(self.precomputed_lights[lightid]) == str:
+            import pandas
+            try:
+               self.precomputed_lights[lightid] = pandas.read_pickle(self.precomputed_lights[lightid])
+            except Exception:
+               print('Error loading precomputation for light id', lightid, 'from file', self.precomputed_lights[lightid])
+               os.remove(self.precomputed_lights[lightid])
+               self.precomputed_lights[lightid] = None
+         return self.precomputed_lights[lightid]
+      else:
+         return None
 
   def clear_precomputation(self):
       """
@@ -256,7 +276,7 @@ class LightEstimator (LightManager):
 
         # use of precomputed lights
         for lightid, lightdirection, irradiance in precomputed_light_values:
-                  value = self.precomputed_lights[lightid]
+                  value = self._get_precomputation(lightid)
                   assert not value is None, "Precomputed light value should not be None"
                   if precomputedresult is None:               
                     precomputedresult = value.copy()

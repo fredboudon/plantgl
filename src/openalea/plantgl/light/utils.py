@@ -20,8 +20,8 @@ def azel2vect(az, el, north = 0):
   """ converter for azimuth elevation 
       az,el are expected in degrees, in the North-clocwise convention
       In the scene, positive rotations are counter-clockwise
-      north is the angle (degrees, positive counter_clockwise) between X+ and North """
-  azimuth = radians(north - az)
+      north is the angle (degrees, positive clockwise) between X+ and North """
+  azimuth = radians(-north - az)
   zenith = radians(90 - el)
   v = -pgl.Vector3(pgl.Vector3.Spherical( 1., azimuth, zenith ) )
   v.normalize()
@@ -31,13 +31,13 @@ def elaz2vect(el, az, north = 0):
   """ converter for azimuth elevation 
       az,el are expected in degrees, in the North-clocwise convention
       In the scene, positive rotations are counter-clockwise
-      north is the angle (degrees, positive counter_clockwise) between X+ and North """
+      north is the angle (degrees, positive clockwise) between X+ and North """
   return azel2vect(az, el, north)
 
 def vect2azel(vector, north = 0):
   svec = pgl.Vector3.Spherical(-vector)
   el = 90 - degrees( svec.phi )
-  az = north - degrees( svec.theta )
+  az = - north - degrees( svec.theta )
   return (az, el)
 
 def vect2elaz(vector, north = 0):
@@ -226,7 +226,7 @@ def haversine_distance(lat1_deg, lon1_deg, lat2_deg, lon2_deg, R=1):
     return R * c
 
 def plot_sky(azimuths, elevations, values, cmap='jet', background='closest', bgresolution=1, 
-             representation = 'polar', projection ='sin', north = 90, colorbarlabel = 'values', elevationticks = True, pointsize = 50, edgecolors= 'black',
+             representation = 'polar', projection ='sin', north = -90, colorbarlabel = 'values', elevationticks = True, pointsize = 50, edgecolors= 'black',
              marker = None, vmin = None, vmax = None):
      """
     Visualize directional lights on a polar (or planar) sky plot.
@@ -305,7 +305,7 @@ def plot_sky(azimuths, elevations, values, cmap='jet', background='closest', bgr
 
      if representation == 'polar':
         fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
-        ax.set_theta_offset(radians(north))
+        ax.set_theta_offset(-radians(north))
         ax.set_theta_direction(-1) # clockwise
         def projection_transform(zen):
             if projection == 'sin':
@@ -355,7 +355,7 @@ def plot_sky(azimuths, elevations, values, cmap='jet', background='closest', bgr
                     pt2 =mt.Vector2(pt.x, pt.y)
                     idx = kdtree.k_closest_points( pt2, 1 )[0]
                     pV[i,j] = values[idx]
-        ax.pcolormesh( np.radians(pX+north) , projection_transform(pY), pV,  shading = 'gouraud', edgecolors=None, cmap=cmap)
+        ax.pcolormesh( np.radians(pX-north) , projection_transform(pY), pV,  shading = 'gouraud', edgecolors=None, cmap=cmap)
     
      scat = ax.scatter( np.radians(azimuths), projection_transform(zeniths), s=pointsize, edgecolors=edgecolors, c=values,  cmap=cmap, marker = marker, vmin = vmin, vmax = vmax)
      if representation != 'vector':

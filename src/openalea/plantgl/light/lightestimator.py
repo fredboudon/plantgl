@@ -206,6 +206,7 @@ class LightEstimator (LightManager):
             try:
                self.precomputed_lights[lightid] = pandas.read_pickle(self.precomputed_lights[lightid])
             except Exception:
+               import os
                print('Error loading precomputation for light id', lightid, 'from file', self.precomputed_lights[lightid])
                os.remove(self.precomputed_lights[lightid])
                self.precomputed_lights[lightid] = None
@@ -264,7 +265,7 @@ class LightEstimator (LightManager):
           multithreaded = self.method_args.get('multithreaded', True)
           if not multithreaded:
             for lightid, lightdirection, irradiance in toprecompute:
-                if  self.precomputed_lights[lightid] is None:
+                if  self._get_precomputation(lightid) is None:
                     value = scene_irradiance_from_dir_vectors(self.scene, [(lightdirection, 1)], method=self.method, **self.method_args)
                     self.precomputed_lights[lightid] = value
           else:

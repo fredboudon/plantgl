@@ -227,7 +227,7 @@ def haversine_distance(lat1_deg, lon1_deg, lat2_deg, lon2_deg, R=1):
 
 def plot_sky(azimuths, elevations, values, cmap='jet', background='closest', bgresolution=1, 
              representation = 'polar', projection ='sin', north = -90, colorbarlabel = 'values', elevationticks = True, pointsize = 50, edgecolors= 'black',
-             marker = None, vmin = None, vmax = None):
+             marker = None, vmin = None, vmax = None, colorbar = True, xylabel = True):
      """
     Visualize directional lights on a polar (or planar) sky plot.
     Parameters
@@ -368,9 +368,11 @@ def plot_sky(azimuths, elevations, values, cmap='jet', background='closest', bgr
         def toDir(v):
             return {0:'N (0°)', 45:'NE', 90:'E\n90°', 135:'SE', 180:'S (180°)', 225:'SW', 270:'W\n270°', 315:'NW', 360:'N (0°)'}[v]
         ax.set_xticks(np.radians(xticks), labels=[toDir(xt) for xt in xticks])
-        ax.set_xlabel('Azimuth')
-        ax.set_ylabel('Elevation (degrees)', labelpad=40)
-     fig.colorbar(scat, label=colorbarlabel, pad=0.1)
+        if xylabel == True:
+            ax.set_xlabel('Azimuth')
+            ax.set_ylabel('Elevation (degrees)', labelpad=40)
+     if colorbar:
+      fig.colorbar(scat, label=colorbarlabel, pad=0.1)
      fig.tight_layout()
      return fig, ax
 

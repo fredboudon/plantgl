@@ -46,6 +46,7 @@ requirements:
     - {{ compiler('cxx') }}
     #- {{ stdlib('cxx') }}
     - cmake
+    - ninja
     - pkg-config                        # [linux]
     - binutils_impl_linux-64            # [linux]
     - bison                             # [unix]

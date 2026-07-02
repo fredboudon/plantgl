@@ -93,12 +93,12 @@ logging.level = "WARNING"
 sdist.include = ["*.so", "*.dylib", "*.dll", "*.pyd", "src/openalea/plantgl/config.py"]
 build.verbose = true
 experimental = true
-cmake.generator = "Ninja"
 
 [tool.scikit-build.wheel]
 packages = ["src/openalea/"]
 
 [tool.scikit-build.cmake]
+generator = "Ninja"
 build-type = "Release"
 source-dir = "."
 

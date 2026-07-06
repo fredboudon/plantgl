@@ -98,7 +98,7 @@ experimental = true
 packages = ["src/openalea/"]
 
 [tool.scikit-build.cmake]
-generator = "Ninja"
+# generator = "Ninja"
 build-type = "Release"
 source-dir = "."
 

@@ -589,7 +589,7 @@ static bool triangleDifferenceBoundary(const Polygon_2& subject, const Polygon_2
     if (edgeCount < 3) return false;
 
     const int start = static_cast<int>(std::find_if(successor.begin(), successor.end(),
-        [](int next) { return next != noVertex; }) - successor.begin());
+        [sentinel = noVertex](int next) { return next != sentinel; }) - successor.begin());
     int current = start;
     bool testDiscard = false;
     for (int count = 0; count < edgeCount; ++count) {

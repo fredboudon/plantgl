@@ -62,6 +62,7 @@
 #include "framebuffermanager.h"
 #include "imagemutex.h"
 #include <condition_variable>
+#include <memory>
 // #include <boost/fiber/mutex.hpp>
 #include <atomic>
 #include <functional>
@@ -332,6 +333,56 @@ RealArray2Ptr ALGO_API formFactors(const Point3ArrayPtr& points,
                                    bool ccw = true,
                                    uint16_t discretization = 200,
                                    bool solidangle = true);
+
+// Keys are triangle indices. The second value is the fraction escaping the mesh.
+using HemicubeFormFactorRow = std::pair<pgl_hash_map<uint32_t, real_t>, real_t>;
+
+/// Estimate one row of diffuse form factors from a point and a surface normal.
+ALGO_API HemicubeFormFactorRow
+hemicubeFormFactors(const Point3ArrayPtr& points, const Index3ArrayPtr& triangles,
+                   const Vector3& center, const Vector3& normal,
+                   uint16_t resolution = 128, uint32_t emitterId = Shape::NOID,
+                   real_t nearPlane = 1e-4, real_t farPlane = REAL_MAX);
+
+/// Estimate rows in input order, sharing weights and reusing buffers per thread.
+/// An empty emitterIds array leaves all triangles in the render.
+ALGO_API std::vector<HemicubeFormFactorRow>
+hemicubeFormFactorsBatch(const Point3ArrayPtr& points, const Index3ArrayPtr& triangles,
+                        const Point3ArrayPtr& centers, const Point3ArrayPtr& normals,
+                        uint16_t resolution = 128, const Index& emitterIds = Index(),
+                        real_t nearPlane = 1e-4, real_t farPlane = REAL_MAX,
+                        unsigned threads = 1);
+
+/// Return first-hit powers in front, back order per triangle, summed over beams.
+/// Directions follow ray travel. A pixelSize of zero selects the default.
+ALGO_API RealArrayPtr directionalFacePowersBatch(
+    const Point3ArrayPtr& points, const Index3ArrayPtr& triangles, const Point3ArrayPtr& normals,
+    const Point3ArrayPtr& directions, const RealArrayPtr& irradiances, real_t pixelSize = 0,
+    unsigned threads = 1);
+
+struct RadiosityPropagation {
+    std::vector<double> outgoing, incident, absorbed;
+    double escaped = 0;
+    double remaining = 0;
+    std::size_t bounces = 0;
+};
+
+/// Diffuse transport on a fixed mesh. Reuses computed form factors between calls.
+class ALGO_API RadiosityTransport {
+public:
+    RadiosityTransport(const Point3ArrayPtr& points, const Index3ArrayPtr& triangles,
+                       const Point3ArrayPtr& centers, const Point3ArrayPtr& normals,
+                       const std::vector<double>& reflectance, const std::vector<double>& transmittance,
+                       bool twoSided, uint16_t resolution, real_t nearPlane, real_t farPlane,
+                       unsigned threads);
+    ~RadiosityTransport();
+
+    RadiosityPropagation propagate(std::vector<double> pending, std::size_t maxBounces, double threshold);
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> data;
+};
 
 /* ----------------------------------------------------------------------- */
 

@@ -110,7 +110,7 @@ else()
 endif()
 
 function(install_share sharedirectory project)
-    install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/${sharedirectory}/ DESTINATION "${CONDA_ENV}/share/${project}")
+    install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/${sharedirectory}/ DESTINATION "${CONDA_ENV}share/${project}")
 endfunction()
 
 

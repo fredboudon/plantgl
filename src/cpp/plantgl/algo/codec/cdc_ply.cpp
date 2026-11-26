@@ -127,13 +127,13 @@ ScenePtr PlyCodec::readScene(std::string const &fname)
 
 	// Data size
 	SpecElementList::const_iterator  itSpec = specs.begin();
-	while(itSpec->first != "vertex" && itSpec != specs.end()) ++itSpec ;
+	while (itSpec != specs.end() && itSpec->first != "vertex") ++itSpec;
 
 	std::size_t const vertexSize = itSpec != specs.end() ? itSpec->second.number : 0;
 	std::size_t const colorSize = !m_colorProps.empty() ? vertexSize : 0;
 
 	itSpec = specs.begin();
-	while(itSpec->first != "face" && itSpec != specs.end()) ++itSpec ;
+	while (itSpec != specs.end() && itSpec->first != "face") ++itSpec;
 
 	std::size_t const faceSize = itSpec != specs.end() ? itSpec->second.number : 0;
 
@@ -141,7 +141,7 @@ ScenePtr PlyCodec::readScene(std::string const &fname)
 	Point3ArrayPtr const points = new Point3Array(vertexSize);
 	Color4ArrayPtr const colors = (colorSize == 0 ? Color4ArrayPtr() : Color4ArrayPtr(new Color4Array(colorSize)));
 	IndexArrayPtr const faces = new IndexArray(faceSize);
-	printf("Data size: %d vertices, %d faces.\n", vertexSize, faceSize);
+	printf("Data size: %zu vertices, %zu faces.\n", vertexSize, faceSize);
 	for (SpecElementList::const_iterator it = specs.begin(); it != specs.end(); ++it) {
 		// Parsing progression
 		std::string message = "Loading PLY file: '"; 
@@ -294,6 +294,12 @@ void PlyCodec::parseVertex(std::size_t i, pgl_hash_map_string<std::vector<proper
 void PlyCodec::parseFace(std::size_t i, pgl_hash_map_string<std::vector<propertyType> > const &element, IndexArrayPtr const faces)
 {
 	pgl_hash_map_string<std::vector<propertyType> >::const_iterator it = element.find("vertex_indices");
+	if (it == element.end()) {
+		it = element.find("vertex_index");
+	}
+	if (it == element.end()) {
+		throw std::runtime_error("Missing vertex indices in PLY face");
+	}
 	
 	GetVisitor<uint_t> visitor;
 	Index index;
@@ -416,7 +422,7 @@ std::vector<std::string> PlyCodec::parseColorProps(SpecElementList const& specs)
 	std::vector<std::string> colorProps;
 
 	SpecElementList::const_iterator  it = specs.begin();
-	while(it->first != "vertex" && it != specs.end()) ++it ;
+	while (it != specs.end() && it->first != "vertex") ++it;
 
 	if (it != specs.end()) {
 		SpecElement const &vertex = it->second;

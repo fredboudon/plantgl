@@ -532,14 +532,11 @@ void ViewFileManager::saveImageWithAlpha()
 void ViewFileManager::saveImage(bool withAlpha)
 {
     QList<QByteArray> _formatList=QImageWriter::supportedImageFormats();
-    QString first_format=_formatList[0];
     QStringList _formats;
-    first_format=first_format.toLower();
 
     for(uint it=0;it<_formatList.count();it++){
         QString format=_formatList[it];
         if(format == "png"){
-            first_format=format.toLower();
             format=format+" "+tr("Files")+" (*."+(format.toLower())+")";
             _formats.prepend(format);
         }
@@ -549,72 +546,49 @@ void ViewFileManager::saveImage(bool withAlpha)
             _formats.append(format);
         }
     }
-    /*
-    QPixmap icon(ViewerIcon::getPixmap(ViewerIcon::filefloppy));
-    QFileDialog _fileDialog(this,"Save Image");
-    _fileDialog.setModal(true);
-    _fileDialog.setFileMode(QFileDialog::AnyFile);
-    _fileDialog.setWindowIcon(QIcon(icon));
-    _fileDialog.setFilters(_formats);
-    */
-
-    QString ext;
-    QString _filename = QFileDialog::getSaveFileName(this, "Save Image", __pictureDir, _formats.join(";;"),& ext);
-
-    /*
-    if(!__pictureDir.isEmpty()){
-      _fileDialog.setDirectory(__pictureDir);
-    }
-    if(__hasOpenFile){
-    QString filename = getLastOpenFile();
-    if(!__pictureDir.isEmpty())
-      filename = QFileInfo(filename).fileName();
-    int ind_ext=filename.lastIndexOf('.');
-    if(ind_ext!=-1)
-        filename.replace(ind_ext+1,(filename.length()-ind_ext-1),first_format);
-       // _fileDialog.setSelection(filename);
-    }
-    _fileDialog.setWindowTitle(tr("Save Image"));
-    if(_fileDialog.exec()){
-    QStringList _filenames=_fileDialog.selectedFiles();
-    if(!_filenames.isEmpty()){
-        QString _filename = _filenames[0];
-    */
-    if (!_filename.isEmpty()) {
-        __pictureDir = QFileInfo(_filename).dir().absolutePath();
-        QString extension=_filename.right(_filename.length()-_filename.lastIndexOf('.')-1);
-        if(extension.contains('/')){
-            // QString ext = _fileDialog.selectedFilter();
-            ext = ext.left(ext.indexOf(' '));
-            _filename +=  '.' +ext.toLower();
-            extension = ext;
+    auto * dialog = new QFileDialog(parentWidget(), tr("Save Image"), __pictureDir,
+                                    _formats.join(";;"));
+    dialog->setAcceptMode(QFileDialog::AcceptSave);
+    dialog->setWindowModality(Qt::WindowModal);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    connect(dialog, &QFileDialog::fileSelected, this,
+            [this, dialog, _formatList, withAlpha](QString filename) {
+        const QString format = dialog->selectedNameFilter().section(' ', 0, 0);
+        const QFileInfo file(filename);
+        __pictureDir = file.absolutePath();
+        QString extension = file.suffix().toLower();
+        if (extension.isEmpty()) {
+            extension = format.toLower();
+            filename += '.' + extension;
         }
-        extension= extension.toUpper();
-        /*if(exists(_filename.toStdString())){
-          if(QMessageBox::warning(this,tr("File Exists"),_filename + tr(" already exist. Overwrite ?"),
-                      tr("Yes"),tr("No"))!=0)
-            return;
-        }*/
-        uint it=0;
-        for(; (it<_formatList.count()) && (extension!=(_formatList.at(it))) ; it++ );
-        if(it==_formatList.count()){
-            //QString ext = _fileDialog.selectedFilter();
-            ext = ext.left(ext.indexOf(' '));
-            __GLFrame->saveImage(_filename,qPrintable(ext));
+        if (!_formatList.contains(extension.toLatin1())) {
+            extension = format.toLower();
         }
-        else {
-            __GLFrame->saveImage(_filename,qPrintable(extension));
-        }
-    }
+        __GLFrame->saveImage(filename, qPrintable(extension), withAlpha);
+    });
+    QTimer::singleShot(0, dialog, [dialog]() {
+        dialog->show();
+        dialog->activateWindow();
+    });
 }
-
-
 
 
 void ViewFileManager::openFile()
 {
-  QString file =  QFileDialog::getOpenFileName ( this, tr("Open"), QFileInfo(getLastOpenFile()).path() ,tr("All Files")+" (*.*)" );
-  openFile(file);
+  // The menu is a transient popup. Keep the dialog attached to the viewer
+  // and let the menu action return before processing the selection.
+  auto * dialog = new QFileDialog(parentWidget(), tr("Open"),
+                                 QFileInfo(getLastOpenFile()).path(),
+                                 tr("All Files") + " (*.*)");
+  dialog->setFileMode(QFileDialog::ExistingFile);
+  dialog->setWindowModality(Qt::WindowModal);
+  dialog->setAttribute(Qt::WA_DeleteOnClose);
+  connect(dialog, SIGNAL(fileSelected(const QString&)), this, SLOT(openFile(const QString&)),
+          Qt::QueuedConnection);
+  QTimer::singleShot(0, dialog, [dialog]() {
+    dialog->show();
+    dialog->activateWindow();
+  });
 }
 
 

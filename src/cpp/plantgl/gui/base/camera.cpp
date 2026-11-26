@@ -631,7 +631,10 @@ ViewCameraGL::beginSelectGL(const QPoint& point)
   __ogl->glPushMatrix();
   __ogl->glLoadIdentity();
 
-  geomPickMatrix(point);
+  GLint viewport[4];
+  __ogl->glGetIntegerv(GL_VIEWPORT, viewport);
+  geomPickMatrix(QPoint(qRound(point.x() * viewport[2] / __width),
+                        qRound(point.y() * viewport[3] / __height)));
 
   glPushProjectionMatrix();
   glInitModelViewMatrix();
@@ -658,7 +661,14 @@ ViewCameraGL::beginSelectGL(const QRect& region)
   __ogl->glPushMatrix();
   __ogl->glLoadIdentity();
 
-  geomPickMatrix(region);
+  GLint viewport[4];
+  __ogl->glGetIntegerv(GL_VIEWPORT, viewport);
+  // Mouse events and the selection outline use Qt's logical coordinates.
+  // The picking matrix uses the viewport's framebuffer pixels.
+  const double scaleX = viewport[2] / __width;
+  const double scaleY = viewport[3] / __height;
+  geomPickMatrix(QRect(qRound(region.x() * scaleX), qRound(region.y() * scaleY),
+                       qRound(region.width() * scaleX), qRound(region.height() * scaleY)));
 
   glPushProjectionMatrix();
   glInitModelViewMatrix();

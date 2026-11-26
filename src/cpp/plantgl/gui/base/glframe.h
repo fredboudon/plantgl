@@ -429,6 +429,8 @@ signals:
   /// Mode of the viewer : 0 = rotation, 1 = selection.
   Mode __mode;
   Mode __lastSelectionMode;
+  bool __temporarySelection;
+  bool __shiftKeyDown;
 
   QRect * __selectionRect;
 

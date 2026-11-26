@@ -214,6 +214,8 @@ ViewGLFrame::ViewGLFrame( QWidget* parent, const char* name, ViewRendererGL * r)
   __linewidth(1),
   __mode(Rotation),
   __lastSelectionMode(Selection),
+  __temporarySelection(false),
+  __shiftKeyDown(false),
   __linedialog(0),
   __selectionRect(0),
   __useOcclusionQuery(false),
@@ -519,6 +521,7 @@ ViewGLFrame::setLineWidth(int i)
 void
 ViewGLFrame::setMultipleSelectionMode()
 {
+  __temporarySelection = false;
   if(__mode != MultipleSelection){
       setCursor(QCursor( Qt::CrossCursor  ));
     __mode = MultipleSelection;
@@ -533,6 +536,7 @@ ViewGLFrame::setMultipleSelectionMode()
 void
 ViewGLFrame::setSelectionMode()
 {
+  __temporarySelection = false;
   if(__mode != Selection){
       setCursor(QCursor( Qt::PointingHandCursor ));
     __mode = Selection;
@@ -547,6 +551,9 @@ ViewGLFrame::setSelectionMode()
 void
 ViewGLFrame::setRotationMode()
 {
+  __temporarySelection = false;
+  delete __selectionRect;
+  __selectionRect = nullptr;
   if(__mode !=Rotation){
       setCursor( Qt::ArrowCursor);
     __mode = Rotation;
@@ -581,7 +588,8 @@ ViewGLFrame::setMode(Mode i)
     __scene->changeModeEvent(__mode);
     emit modeChanged(__mode);
     emit selectionMode(__mode == Selection || __mode == MultipleSelection);
-    __lastSelectionMode = __mode;
+    if (__mode == Selection || __mode == MultipleSelection)
+      __lastSelectionMode = __mode;
   }
 }
 /*
@@ -974,9 +982,9 @@ void ViewGLFrame::multipleSelectGL(const QPoint& p)
 
   GLint hits;
   GLsizei bufsize = 400000;
-  GLuint selectBuf[400000];
+  std::vector<GLuint> selectBuf(bufsize);
 
-  __ogl->glSelectBuffer(bufsize,selectBuf);
+  __ogl->glSelectBuffer(bufsize,selectBuf.data());
   (void)__ogl->glRenderMode(GL_SELECT);
 
   GL_ERROR;
@@ -986,10 +994,7 @@ void ViewGLFrame::multipleSelectGL(const QPoint& p)
   // transformations induites dans le repere du labo a partir
   // des coord de la souris dans le repere de la GL
 
-  __camera->beginSelectGL(QRect(min(__mouse.x(),p.x()),
-                                min(__mouse.y(),p.y()),
-                                abs(__mouse.x()-p.x()),
-                                abs(__mouse.y()-p.y())));
+  __camera->beginSelectGL(QRect(__mouse, p).normalized());
 
   __ogl->glLineWidth(1);
   __ogl->glPointSize(1);
@@ -1010,7 +1015,7 @@ void ViewGLFrame::multipleSelectGL(const QPoint& p)
 
   hits = __ogl->glRenderMode(GL_RENDER);
   GLuint names, *ptr;
-  ptr = (GLuint *) selectBuf;
+  ptr = selectBuf.data();
   uint_t val;
   float z;
 
@@ -1317,7 +1322,7 @@ ViewGLFrame::getProjectionPixelPerColor(double* pixelwidth)
     return res;
 }
 
-QPoint toDevice(QWidget * widget, const QPoint ref) {
+static QPoint scaleDragPosition(QWidget * widget, const QPoint ref) {
   double scaling = widget->window()->devicePixelRatio();
   return QPoint(int(ref.x()/scaling),int(ref.y()/scaling));
 }
@@ -1325,7 +1330,13 @@ QPoint toDevice(QWidget * widget, const QPoint ref) {
 
 void ViewGLFrame::mousePressEvent( QMouseEvent* event)
 {
-  __mouse = toDevice(this,event->pos());
+  __mouse = event->pos();
+
+  if (__mode == Rotation && (event->modifiers() & Qt::ShiftModifier) &&
+      !(event->modifiers() & Qt::AltModifier)) {
+    setLastSelectionMode();
+    __temporarySelection = true;
+  }
 
   if(__mode == Selection){
     selectGL();
@@ -1340,11 +1351,6 @@ void ViewGLFrame::mousePressEvent( QMouseEvent* event)
         QBitmap bm = QBitmap::fromData(QSize(32,32),ViewerIcon::LIGHT_BITS,QImage::Format_MonoLSB );
         QBitmap mask = QBitmap::fromData(QSize(32,32),ViewerIcon::LIGHT_MASK,QImage::Format_MonoLSB);
         setCursor(QCursor(bm,mask));
-      }
-      else if (event->modifiers() & Qt::ShiftModifier)
-      {
-        setLastSelectionMode();
-        if(__mode == Selection)selectGL();
       }
       else if (event->modifiers() & Qt::ControlModifier)
       {
@@ -1384,16 +1390,16 @@ void ViewGLFrame::mousePressEvent( QMouseEvent* event)
 void ViewGLFrame::mouseReleaseEvent( QMouseEvent* event)
 {
   if(__mode == Selection){
-    if(!__scene->endSelect())setRotationMode();
+    if (!__scene->endSelect() && __temporarySelection && !__shiftKeyDown) setRotationMode();
   }
   else if(__mode == MultipleSelection){
     delete __selectionRect;
     __selectionRect = 0;
-    QPoint mouse = toDevice(this,event->pos());
+    const QPoint mouse = event->pos();
     status(QString(tr("Selection from")+" (%1,%2) "+tr("to")+" (%3,%4)")
             .arg(__mouse.x()).arg(__mouse.y()).arg(mouse.x()).arg(mouse.y()),2000);
     multipleSelectGL(mouse);
-    setRotationMode();
+    if (__temporarySelection && !__shiftKeyDown) setRotationMode();
   }
   else setCursor(Qt::ArrowCursor);
 
@@ -1402,20 +1408,16 @@ void ViewGLFrame::mouseReleaseEvent( QMouseEvent* event)
 
 void ViewGLFrame::mouseMoveEvent( QMouseEvent* event)
 {
-  QPoint mouse = toDevice(this,event->pos());
+  const QPoint mouse = event->pos();
+  const QPoint delta = scaleDragPosition(this, __mouse) - scaleDragPosition(this, mouse);
   if(__mode == MultipleSelection){
     status(QString(tr("Selection from")+" (%1,%2) "+tr("to")+" (%3,%4)")
             .arg(__mouse.x()).arg(__mouse.y()).arg(mouse.x()).arg(mouse.y()),2000);
-    if(__selectionRect)
-      *__selectionRect = QRect(min(__mouse.x(),mouse.x()),
-                                min(__mouse.y(),mouse.y()),
-                                abs(__mouse.x()-mouse.x()),
-                                abs(__mouse.y()-mouse.y()));
+    const QRect rect = QRect(__mouse, mouse).normalized();
+    if (__selectionRect)
+      *__selectionRect = rect;
     else
-    __selectionRect = new QRect(min(__mouse.x(),mouse.x()),
-                                min(__mouse.y(),mouse.y()),
-                                abs(__mouse.x()-mouse.x()),
-                                abs(__mouse.y()-mouse.y()));
+      __selectionRect = new QRect(rect);
     repaint();
   }
   else if(__mode == Selection || event->modifiers() & Qt::ShiftModifier)
@@ -1423,15 +1425,15 @@ void ViewGLFrame::mouseMoveEvent( QMouseEvent* event)
       if(__scene){
         if(event->buttons() & Qt::LeftButton)
           {
-            __scene->rotate(__mouse-mouse);
+            __scene->rotate(delta);
           }
         else if(event->buttons() & Qt::RightButton)
           {
-            __scene->move(__mouse-mouse);
+            __scene->move(delta);
           }
         else if(event->buttons() & Qt::MiddleButton)
           {
-            __scene->zoom(__mouse-mouse);
+            __scene->zoom(delta);
           }
       }
       __mouse = mouse;
@@ -1441,15 +1443,15 @@ void ViewGLFrame::mouseMoveEvent( QMouseEvent* event)
     {
       if(event->buttons() & Qt::LeftButton)
         {
-          __light->rotate(__mouse-mouse);
+          __light->rotate(delta);
         }
       else if(event->buttons() & Qt::RightButton)
         {
-          __light->move(__mouse-mouse);
+          __light->move(delta);
         }
       else if(event->buttons() & Qt::MiddleButton)
     {
-      __light->zoom(__mouse-mouse);
+      __light->zoom(delta);
     }
     __mouse = mouse;
     update();
@@ -1458,15 +1460,15 @@ void ViewGLFrame::mouseMoveEvent( QMouseEvent* event)
   {
       if(event->buttons() & Qt::LeftButton)
       {
-        __camera->move(__mouse-mouse);
+        __camera->move(delta);
       }
       else if(event->buttons() & Qt::RightButton)
       {
-        __camera->zoom(__mouse-mouse);
+        __camera->zoom(delta);
       }
       else if(event->buttons() & Qt::MiddleButton)
       {
-        __camera->zoom(__mouse-mouse);
+        __camera->zoom(delta);
       }
       __mouse = mouse;
       update();
@@ -1474,15 +1476,15 @@ void ViewGLFrame::mouseMoveEvent( QMouseEvent* event)
   else {
       if(event->buttons() & Qt::LeftButton)
       {
-        __camera->rotate(__mouse-mouse);
+        __camera->rotate(delta);
       }
     else if(event->buttons() & Qt::RightButton)
       {
-        __camera->move(__mouse-mouse);
+        __camera->move(delta);
     }
     else if(event->buttons() & Qt::MiddleButton)
       {
-        __camera->zoom(__mouse-mouse);
+        __camera->zoom(delta);
       }
     __mouse = mouse;
     update();
@@ -1541,6 +1543,15 @@ ViewGLFrame::wheelEvent ( QWheelEvent * e){
 void
 ViewGLFrame::keyPressEvent ( QKeyEvent * e)
 {
+  if (e->key() == Qt::Key_Shift) {
+    __shiftKeyDown = true;
+    if (__mode == Rotation) {
+      setLastSelectionMode();
+      __temporarySelection = true;
+    }
+    e->accept();
+    return;
+  }
   if(e->modifiers() & Qt::ShiftModifier){
     if( e->key() == Qt::Key_Up){
       __scene->rotating(0,2);
@@ -1563,7 +1574,6 @@ ViewGLFrame::keyPressEvent ( QKeyEvent * e)
       update();
     }
     else {
-      setSelectionMode();
       e->accept();
     }
   }
@@ -1648,8 +1658,12 @@ ViewGLFrame::keyPressEvent ( QKeyEvent * e)
 void
 ViewGLFrame::keyReleaseEvent ( QKeyEvent * e)
 {
-  if(e->modifiers() & Qt::ShiftModifier){
-    setRotationMode();
+  if (e->key() == Qt::Key_Shift) {
+    __shiftKeyDown = false;
+    if (__temporarySelection) {
+      setRotationMode();
+      update();
+    }
     e->accept();
   }
   else if(e->modifiers() & Qt::AltModifier){
@@ -1842,7 +1856,14 @@ ViewGLFrame::fillToolBar(QToolBar * toolBar)
   QPixmap wizardRectIcon( ViewerIcon::getPixmap(ViewerIcon::wizardrect) );
   QPixmap wizardIconMenu( ViewerIcon::getPixmap(ViewerIcon::wizardmenu) );
 
-  ViewDoubleToolButton * bt2 = new ViewDoubleToolButton( wizardIcon,  wizardRectIcon,tr("Selection"), this, SLOT(setLastSelectionMode()), toolBar);
+  ViewDoubleToolButton * bt2 = new ViewDoubleToolButton(wizardIcon, wizardRectIcon,
+                                                       tr("Selection"), nullptr, nullptr, toolBar);
+  connect(bt2, &QToolButton::clicked, this, [this](bool checked) {
+    if (checked)
+      setLastSelectionMode();
+    else
+      setRotationMode();
+  });
   QString wizardtext =tr("<b>Selection</b><br><br>Allows you to select shapes from the scene<br><br>"
     "Press deeply this button to have the choice between two modes of selection<br><br>"
     "<b>Point selection</b> allows you to select one particular shapes<br>"
@@ -1856,6 +1877,8 @@ ViewGLFrame::fillToolBar(QToolBar * toolBar)
 
   QObject::connect(this,SIGNAL(selectionMode(bool)),bt2,SLOT(setChecked(bool)));
   QObject::connect(this,SIGNAL(modeChanged(ViewGLFrame::Mode)),bt2,SLOT(setButton(ViewGLFrame::Mode)));
+  bt2->setChecked(__mode == Selection || __mode == MultipleSelection);
+  bt2->setButton(__lastSelectionMode);
 
   QPixmap notwizardIcon( ViewerIcon::getPixmap(ViewerIcon::notwizard) );
   QString notwizardtext =tr("Clear Selection");
@@ -2094,7 +2117,8 @@ ViewDoubleToolButton::ViewDoubleToolButton( const QPixmap & pm,
                                          QToolBar * parent ):
 QToolButton(parent),
   __pm1(pm),__pm2(pm2){
-  connect(this,SIGNAL(triggered(QAction *)),receiver,slot);
+  if (receiver && slot)
+    connect(this,SIGNAL(triggered(QAction *)),receiver,slot);
   PGL(drawArrow)(&__pm1);
   QBitmap mask = __pm1.mask();
   PGL(drawArrow)(&mask);

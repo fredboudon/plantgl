@@ -76,6 +76,8 @@
 
 /// Qt
 #include <QtGlobal>
+#include <QTimer>
+#include <functional>
 #if QT_VERSION >= QT_VERSION_CHECK(5,0,0)
     #include <QtWidgets/qlabel.h>
     #include <QtWidgets/qcombobox.h>
@@ -315,20 +317,42 @@ ViewGeomSceneGL::openStream(std::istream& stream)
 
 /* ----------------------------------------------------------------------- */
 
+namespace {
+
+void selectExistingFile(QWidget * frame, QObject * context, const QString& caption,
+                        const QString& initial, const QString& filter,
+                        const std::function<void(const QString&)>& onSelected)
+{
+  // Let the menu close before the native panel takes keyboard focus.
+  auto * dialog = new QFileDialog(frame->window(), caption, initial, filter);
+  dialog->setFileMode(QFileDialog::ExistingFile);
+  dialog->setWindowModality(Qt::WindowModal);
+  dialog->setAttribute(Qt::WA_DeleteOnClose);
+  QObject::connect(dialog, &QFileDialog::fileSelected, context, onSelected, Qt::QueuedConnection);
+  QTimer::singleShot(0, dialog, [dialog]() {
+    dialog->show();
+    dialog->activateWindow();
+  });
+}
+
+} // namespace
+
 void
 ViewGeomSceneGL::openGeomFile()
 {
-  QString filename = QFileDialog::getOpenFileName(__frame,"Open PlantGL",getFilename(),tr("PlantGL File")+" (*.geom;*.bgeom);;"+tr("All Files (*.*)"));
-  if(!filename.isEmpty())
-     openGeomFile(filename);
+  selectExistingFile(__frame, this, "Open PlantGL", getFilename(), tr("PlantGL File")+" (*.geom;*.bgeom);;"+tr("All Files (*.*)"),
+                     [this](const QString& filename) {
+    openGeomFile(filename);
+  });
 }
 
 void
 ViewGeomSceneGL::addGeomFile()
 {
-  QString filename = QFileDialog::getOpenFileName(__frame,"Open PlantGL",getFilename(),tr("PlantGL File")+" (*.geom;*.bgeom);;"+tr("All Files (*.*)"));
-  if(!filename.isEmpty())
-     addGeomFile(filename);
+  selectExistingFile(__frame, this, "Open PlantGL", getFilename(), tr("PlantGL File")+" (*.geom;*.bgeom);;"+tr("All Files (*.*)"),
+                     [this](const QString& filename) {
+    addGeomFile(filename);
+  });
 }
 
 /* ----------------------------------------------------------------------- */
@@ -336,10 +360,10 @@ ViewGeomSceneGL::addGeomFile()
 void
 ViewGeomSceneGL::openAmapSymbol()
 {
-  QString filename = QFileDialog::getOpenFileName(__frame,"Open Symbol",getFilename(),tr("Amap Symbol")+" (*.smb);;"+tr("All Files (*.*)"));
-  if(!filename.isEmpty()){
+  selectExistingFile(__frame, this, "Open Symbol", getFilename(), tr("Amap Symbol")+" (*.smb);;"+tr("All Files (*.*)"),
+                     [this](const QString& filename) {
     openAmapSymbol(filename);
-  }
+  });
 }
 
 
@@ -347,9 +371,10 @@ ViewGeomSceneGL::openAmapSymbol()
 void
 ViewGeomSceneGL::openGeomViewFile()
 {
-  QString filename = QFileDialog::getOpenFileName(__frame,"Open GeomView File",getFilename(),"");
-  if(!filename.isEmpty())
-     openGeomViewFile(filename);
+  selectExistingFile(__frame, this, "Open GeomView File", getFilename(), "",
+                     [this](const QString& filename) {
+    openGeomViewFile(filename);
+  });
 }
 
 void
@@ -362,19 +387,19 @@ ViewGeomSceneGL::openLinetree()
 void
 ViewGeomSceneGL::openVegeStar()
 {
-  QString filename = QFileDialog::getOpenFileName(__frame,"Open VegeStar File",getFilename(),tr("VegeStar File")+" (*.vgx;*.vgs);;"+tr("All Files (*.*)"));
-  if(!filename.isEmpty()){
+  selectExistingFile(__frame, this, "Open VegeStar File", getFilename(), tr("VegeStar File")+" (*.vgx;*.vgs);;"+tr("All Files (*.*)"),
+                     [this](const QString& filename) {
     openVegeStar(filename);
-  }
+  });
 }
 
 void
 ViewGeomSceneGL::openVegeStarSymbol1()
 {
-  QString filename = QFileDialog::getOpenFileName(__frame,"Open Symbol",getFilename(),tr("VegeStar Symbol")+" (*.pol);;"+tr("All Files (*.*)"));
-  if(!filename.isEmpty()){
+  selectExistingFile(__frame, this, "Open Symbol", getFilename(), tr("VegeStar Symbol")+" (*.pol);;"+tr("All Files (*.*)"),
+                     [this](const QString& filename) {
     openVegeStarSymbol1(filename);
-  }
+  });
 }
 
 bool
@@ -411,8 +436,8 @@ ViewGeomSceneGL::openVegeStarSymbol1(const QString& filename,bool add)
 void
 ViewGeomSceneGL::openVegeStarSymbol2()
 {
-  QString filename = QFileDialog::getOpenFileName(__frame,"Open Symbol",getFilename(),tr("VegeStar Symbol")+" (*.pol);;"+tr("All Files (*.*)"));
-  if(!filename.isEmpty()){
+  selectExistingFile(__frame, this, "Open Symbol", getFilename(), tr("VegeStar Symbol")+" (*.pol);;"+tr("All Files (*.*)"),
+                     [this](const QString& filename) {
     stringstream _errlog(ios::out) ;
     GeometryPtr _symbol = VegeStarFile::importPolygonFile(filename.toStdString(),_errlog);
     string _msg = _errlog.str();
@@ -428,14 +453,14 @@ ViewGeomSceneGL::openVegeStarSymbol2()
         setFilename(filename);
       }
     }
-  }
+  });
 }
 
 void
 ViewGeomSceneGL::openVegeStarSymbol3()
 {
-  QString filename = QFileDialog::getOpenFileName(__frame,"Open Symbol",getFilename(),tr("VegeStar Symbol")+" (*.pol);;"+tr("All Files (*.*)"));
-  if(!filename.isEmpty()){
+  selectExistingFile(__frame, this, "Open Symbol", getFilename(), tr("VegeStar Symbol")+" (*.pol);;"+tr("All Files (*.*)"),
+                     [this](const QString& filename) {
     stringstream _errlog(ios::out) ;
     GeometryPtr _symbol = VegeStarFile::importPolygonFile(filename.toStdString(),_errlog);
     string _msg = _errlog.str();
@@ -451,7 +476,7 @@ ViewGeomSceneGL::openVegeStarSymbol3()
         setFilename(filename);
       }
     }
-  }
+  });
 }
 void
 ViewGeomSceneGL::showVegeStarSymbol1(){
@@ -1294,13 +1319,15 @@ ViewMultiGeomSceneGL::openGeomFiles(const QString& filename,const QString& filen
 void
 ViewMultiGeomSceneGL::openGeomFiles()
 {
-  QString filename = QFileDialog::getOpenFileName(__frame,"Open PlantGL",getFilename(),tr("PlantGL File")+" (*.geom;*.bgeom);;"+tr("All Files (*.*)"));
-  if(!filename.isEmpty()){
-    QString filename2 = QFileDialog::getOpenFileName(__frame,"Open PlantGL",getFilename(),tr("PlantGL File")+" (*.geom;*.bgeom);;"+tr("All Files (*.*)"));
-    if(!filename.isEmpty()){
-      openGeomFiles(filename,filename2);
-    }
-  }
+  const QString caption = tr("Open PlantGL");
+  const QString filter = tr("PlantGL File") + " (*.geom;*.bgeom);;" + tr("All Files (*.*)");
+  selectExistingFile(__frame, this, caption, getFilename(), filter,
+                     [this, caption, filter](const QString& firstFilename) {
+    selectExistingFile(__frame, this, caption, getFilename(), filter,
+                       [this, firstFilename](const QString& secondFilename) {
+      openGeomFiles(firstFilename, secondFilename);
+    });
+  });
 }
 
 

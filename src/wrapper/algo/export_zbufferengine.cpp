@@ -78,6 +78,55 @@ boost::python::object py_agregate_idsurfaces(ZBufferEngine * engine) {
 }
 
 
+static bp::tuple hemicubeRowToPython(const HemicubeFormFactorRow& row)
+{
+    bp::dict factors;
+    for (const auto& entry : row.first)
+        factors[entry.first] = entry.second;
+    return bp::make_tuple(factors, row.second);
+}
+
+static bp::tuple py_hemicubeFormFactors(const Point3ArrayPtr& points, const Index3ArrayPtr& triangles,
+                                        const Vector3& center, const Vector3& normal,
+                                        uint16_t resolution, uint32_t emitterId,
+                                        real_t nearPlane, real_t farPlane)
+{
+    return hemicubeRowToPython(hemicubeFormFactors(points, triangles, center, normal, resolution,
+                                                  emitterId, nearPlane, farPlane));
+}
+
+static bp::list py_hemicubeFormFactorsBatch(const Point3ArrayPtr& points, const Index3ArrayPtr& triangles,
+                                            const Point3ArrayPtr& centers, const Point3ArrayPtr& normals,
+                                            uint16_t resolution, const Index& emitterIds,
+                                            real_t nearPlane, real_t farPlane, unsigned threads)
+{
+    bp::list rows;
+    for (const auto& row : hemicubeFormFactorsBatch(points, triangles, centers, normals, resolution,
+                                                   emitterIds, nearPlane, farPlane, threads))
+        rows.append(hemicubeRowToPython(row));
+    return rows;
+}
+
+static RadiosityTransport* makeRadiosityTransport(
+    const Point3ArrayPtr& points, const Index3ArrayPtr& triangles,
+    const Point3ArrayPtr& centers, const Point3ArrayPtr& normals,
+    bp::object reflectance, bp::object transmittance, bool twoSided,
+    uint16_t resolution, real_t nearPlane, bp::object farPlane, unsigned threads)
+{
+    const real_t far = farPlane.is_none() ? REAL_MAX : bp::extract<real_t>(farPlane)();
+    return new RadiosityTransport(points, triangles, centers, normals,
+                                  extract_vec<double>(reflectance)(), extract_vec<double>(transmittance)(),
+                                  twoSided, resolution, nearPlane, far, threads);
+}
+
+static bp::tuple propagateRadiosity(RadiosityTransport& transport, bp::object pending,
+                                     std::size_t maxBounces, double threshold)
+{
+    const auto result = transport.propagate(extract_vec<double>(pending)(), maxBounces, threshold);
+    return bp::make_tuple(make_list(result.outgoing)(), make_list(result.incident)(),
+                          make_list(result.absorbed)(), result.escaped, result.remaining, result.bounces);
+}
+
 void export_ZBufferEngine()
 {
 
@@ -141,5 +190,22 @@ void export_ZBufferEngine()
       .def("aggregateIdSurfaces", &py_agregate_idsurfaces)
      ;
 
+      def("hemicubeFormFactors", &py_hemicubeFormFactors,
+          (bp::arg("points"), bp::arg("triangles"), bp::arg("center"), bp::arg("normal"),
+           bp::arg("resolution")=128, bp::arg("emitterId")=Shape::NOID,
+           bp::arg("near")=1e-4, bp::arg("far")=REAL_MAX),
+          "Return (factors_by_triangle_index, escaped_fraction) for a diffuse point emitter.");
+      def("hemicubeFormFactorsBatch", &py_hemicubeFormFactorsBatch,
+          (bp::arg("points"), bp::arg("triangles"), bp::arg("centers"), bp::arg("normals"),
+           bp::arg("resolution")=128, bp::arg("emitterIds")=Index(),
+           bp::arg("near")=1e-4, bp::arg("far")=REAL_MAX, bp::arg("threads")=1),
+          "Return hemicube form factor rows in emitter order using up to threads workers.");
+      def("directionalFacePowersBatch", &directionalFacePowersBatch,
+          (bp::arg("points"), bp::arg("triangles"), bp::arg("normals"), bp::arg("directions"),
+           bp::arg("irradiances"), bp::arg("pixelSize")=0, bp::arg("threads")=1),
+          "Return interleaved front and back powers from batched orthographic Z-buffer projections.");
+      bp::class_<RadiosityTransport, boost::noncopyable>("_RadiosityTransport", bp::no_init)
+          .def("__init__", bp::make_constructor(&makeRadiosityTransport))
+          .def("propagate", &propagateRadiosity);
       def("formFactors", &formFactors, (bp::arg("points"), bp::arg("triangles"), bp::arg("normals")=Point3ArrayPtr(0), bp::arg("ccw")=true, bp::arg("discretization")=200, bp::arg("solidangle")=200));
 }

@@ -49,6 +49,12 @@
 #include <boost/thread.hpp>
 #include <boost/bind.hpp>
 #include <chrono>
+#include <array>
+#include <atomic>
+#include <future>
+#include <limits>
+#include <optional>
+#include <stdexcept>
 /* ----------------------------------------------------------------------- */
 
 PGL_USING_NAMESPACE
@@ -326,6 +332,42 @@ void ZBufferEngine::iprocess(TriangleSetPtr triangles, AppearancePtr appearance,
 }
 
 
+// Bound a spherical projection using a cap containing all triangle rays.
+static void sphericalRasterBounds(const SphericalCamera& camera,
+                                  const Vector3& a, const Vector3& b, const Vector3& c,
+                                  uint16_t width, uint16_t height,
+                                  real_t& xmin, real_t& ymin, real_t& xmax, real_t& ymax)
+{
+    xmin = ymin = 0;
+    xmax = width;
+    ymax = height;
+    const real_t halfAngle = camera.getViewAngle() * GEOM_RAD / 2;
+    if (halfAngle <= GEOM_EPSILON || halfAngle > GEOM_HALF_PI ||
+        norm(a) <= GEOM_EPSILON || norm(b) <= GEOM_EPSILON || norm(c) <= GEOM_EPSILON)
+        return;
+
+    const Vector3 u = a.normed(), v = b.normed(), w = c.normed();
+    const Vector3 sum = u + v + w;
+    if (norm(sum) <= GEOM_EPSILON) return;
+    const Vector3 center = sum.normed();
+    if (center.z() >= 0) return;
+
+    const real_t chord = max3(norm(u - center), norm(v - center), norm(w - center));
+    const real_t angularRadius = 2 * std::asin(std::min(real_t(1), chord / 2)) + GEOM_EPSILON;
+    if (angularRadius >= GEOM_HALF_PI) return;
+    // A cap of angular radius below pi/2 is convex in ray directions.
+    // On the forward hemisphere, the equidistant map expands angular
+    // distances by at most pi/2 before scaling by the camera's half angle.
+    const real_t radius = angularRadius * GEOM_HALF_PI / halfAngle;
+    const Vector3 rasterCenter = camera.cameraToRaster(center, width, height);
+    const real_t rx = radius * width / 2;
+    const real_t ry = radius * height / 2;
+    xmin = std::max(real_t(0), rasterCenter.x() - rx);
+    xmax = std::min(real_t(width), rasterCenter.x() + rx);
+    ymin = std::max(real_t(0), rasterCenter.y() - ry);
+    ymax = std::min(real_t(height), rasterCenter.y() + ry);
+}
+
 void ZBufferEngine::renderShadedTriangle(const TOOLS(Vector3)& v0, const TOOLS(Vector3)& v1_, const TOOLS(Vector3)& v2_, bool ccw, const uint32_t id, const TriangleShaderPtr& shader,  const ProjectionCameraPtr& camera)
 {
     Vector3 v1 = v1_;
@@ -340,10 +382,13 @@ void ZBufferEngine::renderShadedTriangle(const TOOLS(Vector3)& v0, const TOOLS(V
     Vector3 v1Cam = camera->worldToCamera(v1);
     Vector3 v2Cam = camera->worldToCamera(v2);
 
-    // Convert the vertices of the triangle to raster space
-    Vector3 v0Raster = camera->cameraToRaster(v0Cam,__imageWidth, __imageHeight);
-    Vector3 v1Raster = camera->cameraToRaster(v1Cam,__imageWidth, __imageHeight);
-    Vector3 v2Raster = camera->cameraToRaster(v2Cam,__imageWidth, __imageHeight);
+    const bool spherical = camera->type() == ProjectionCamera::eHemispheric;
+    Vector3 v0Raster, v1Raster, v2Raster;
+    if (!spherical) {
+        v0Raster = camera->cameraToRaster(v0Cam, __imageWidth, __imageHeight);
+        v1Raster = camera->cameraToRaster(v1Cam, __imageWidth, __imageHeight);
+        v2Raster = camera->cameraToRaster(v2Cam, __imageWidth, __imageHeight);
+    }
 
     /*printf("rasterize t point [%f,%f,%f] \n",v0Raster.x(),v0Raster.y(),v0Raster.z());
     printf("rasterize t point [%f,%f,%f] \n",v1Raster.x(),v1Raster.y(),v1Raster.z());
@@ -368,7 +413,11 @@ void ZBufferEngine::renderShadedTriangle(const TOOLS(Vector3)& v0, const TOOLS(V
     zmin = min3(v0Raster.z(), v1Raster.z(), v2Raster.z());
     zmax = max3(v0Raster.z(), v1Raster.z(), v2Raster.z());
 
-    if(camera->methodType() == ProjectionCamera::eRayIntersection && (std::floor(xmax)-std::floor(xmin)>1) && (std::floor(ymax)-std::floor(ymin)>1)) {
+    if (spherical) {
+        sphericalRasterBounds(static_cast<const SphericalCamera&>(*camera), v0Cam, v1Cam, v2Cam,
+                              __imageWidth, __imageHeight, xmin, ymin, xmax, ymax);
+    }
+    else if(camera->methodType() == ProjectionCamera::eRayIntersection && (std::floor(xmax)-std::floor(xmin)>1) && (std::floor(ymax)-std::floor(ymin)>1)) {
         std::pair<Vector3, real_t> csphere = circumsphere(v0Raster,v1Raster,v2Raster);
         Vector3 vMeanRaster = csphere.first;
         real_t radius = csphere.second;
@@ -387,7 +436,7 @@ void ZBufferEngine::renderShadedTriangle(const TOOLS(Vector3)& v0, const TOOLS(V
     }
 
       // the triangle is out of screen
-    if (xmin >= __imageWidth  || xmax < 0 || ymin >= __imageHeight || ymax < 0 || !camera->isInZRange(zmin, zmax)) {
+    if (xmin >= __imageWidth  || xmax < 0 || ymin >= __imageHeight || ymax < 0 || (!spherical && !camera->isInZRange(zmin, zmax))) {
         return;
     }
 
@@ -484,8 +533,10 @@ void ZBufferEngine::rasterize(int32_t x0, int32_t x1, int32_t y0, int32_t y1,
 
     FragmentQueue fragqueue;
 
+    const bool spherical = camera->type() == ProjectionCamera::eHemispheric;
+
     // Inner loop
-    if ((x0 == x1) && (y0 == y1)) {
+    if (!spherical && x0 == x1 && y0 == y1) {
         if (camera->isValidPixel(x0,y0,__imageWidth, __imageHeight)){
             real_t z = (z0+z1+z2)/3;
             real_t w0 = 1/3.;
@@ -523,9 +574,16 @@ void ZBufferEngine::rasterize(int32_t x0, int32_t x1, int32_t y0, int32_t y1,
                     }
                 }
                 else {
-                    if (camera->isValidPixel(pixelSample.x(),pixelSample.y(),__imageWidth, __imageHeight)){
+                    if (camera->isValidPixel(x, y, __imageWidth, __imageHeight)) {
+                        const Vector3 sample(pixelSample.x(), pixelSample.y(), 1);
+                        if (spherical) {
+                            const Vector3 ndc = camera->rasterToNDC(sample, __imageWidth, __imageHeight);
+                            if (ndc.x()*ndc.x() + ndc.y()*ndc.y() > 1) continue;
+                        }
                         Vector3 intersection;
-                        Ray ray = __camera->rasterToCameraRay(pixelSample.x(), pixelSample.y(), __imageWidth, __imageHeight);
+                        Ray ray = spherical
+                            ? Ray(Vector3(0,0,0), camera->rasterToCamera(sample, __imageWidth, __imageHeight).normed())
+                            : camera->rasterToCameraRay(x, y, __imageWidth, __imageHeight);
                         int intersected = ray.intersect(v0Cam, v1Cam, v2Cam, intersection);
 
                         bool orientation = dot(normal, ray.getDirection()) < GEOM_EPSILON;
@@ -537,6 +595,7 @@ void ZBufferEngine::rasterize(int32_t x0, int32_t x1, int32_t y0, int32_t y1,
                             real_t w1 = norm(cross(v2Cam-v0Cam, v2Cam-intersection));
                             real_t w2 = norm(cross(v0Cam-v1Cam, v0Cam-intersection));
                             real_t z = norm(intersection);
+                            if (spherical && !camera->isInZRange(z)) continue;
                             _tryRenderRaster(Fragment(x,y,z, is_valid_ptr(shader) ? shader->process(x, y, z, (w0 / area), (w1 / area), (w2 / area)) : Color4::BLACK, id, orientation), fragqueue );
                         }
                     }
@@ -836,6 +895,10 @@ void ZBufferEngine::periodizeBuffer(const Vector3& from, const Vector3& to, bool
 
 void ZBufferEngine::periodizeBuffer(int32_t xDiff, int32_t yDiff, real_t zDiff, bool useDefaultColor, const Color3& defaultcolor)
 {
+    // Check image bounds before negating the signed offsets.
+    const int32_t width = __imageWidth, height = __imageHeight;
+    if (xDiff <= -width || xDiff >= width || yDiff <= -height || yDiff >= height)
+        return;
     _bufferPeriodizationStep(xDiff, yDiff, zDiff, useDefaultColor, defaultcolor);
     _bufferPeriodizationStep(-xDiff, -yDiff, -zDiff, useDefaultColor, defaultcolor);
 
@@ -845,47 +908,27 @@ void ZBufferEngine::_bufferPeriodizationStep(int32_t xDiff, int32_t yDiff, real_
 {
     if(xDiff == 0  && yDiff == 0 && fabs(zDiff) < GEOM_EPSILON) return;
 
-    uint32_t width = __imageWidth;
-    uint32_t height = __imageHeight;
+    const int32_t width = __imageWidth, height = __imageHeight;
+    // Visit source pixels before their copies so a period can propagate to
+    // the edge of the image in either direction.
+    const int32_t xStart = xDiff < 0 ? width - 1 + xDiff : xDiff;
+    const int32_t xEnd = xDiff < 0 ? -1 : width;
+    const int32_t xStep = xDiff < 0 ? -1 : 1;
+    const int32_t yStart = yDiff < 0 ? height - 1 + yDiff : yDiff;
+    const int32_t yEnd = yDiff < 0 ? -1 : height;
+    const int32_t yStep = yDiff < 0 ? -1 : 1;
 
-    int32_t xStart = 0;
-    int32_t xEnd = width;
-    int32_t xStep = 1;
-
-    if (fabs(xDiff) >= width) { return; }
-    if (xDiff < 0) {
-         xStart = width-1;
-         xEnd = -1;
-         xStep = -1;
-    }
-    xStart += xDiff;
-    
-    int32_t yStart = 0;
-    int32_t yEnd = height;
-    int32_t yStep = 1;
-
-    if (fabs(yDiff) >= height) { return; }
-    /*if (yDiff < 0) {
-         yStart = height-1;
-         yEnd = -1;
-         yStep = -1;
-    }*/
-    if (yDiff < 0) {
-        yEnd += yDiff;
-    }
-    else {
-        yStart += yDiff;        
-    }
-
-    // printf("%i %i %f\n", xDiff, yDiff, zDiff);
-    // printf("x:%i %i %i\n", xStart, xEnd, xStep);
-    // printf("y:%i %i %i\n", yStart, yEnd, yStep);
-
-    for (int32_t i = xStart ; i != xEnd ; i+=xStep) {
-        for (int32_t j = yStart ; j < yEnd ; j+=yStep) {
-            real_t potentialz = __depthBuffer->getAt(i-xDiff,j-yDiff)+zDiff;
-            // if (__camera->isInZRange(potentialz))
-                renderRaster(i, j, potentialz, useDefaultColor || is_null_ptr(__frameBuffer)? defaultcolor : getFrameBufferAt(i-xDiff,j-yDiff));
+    for (int32_t x = xStart; x != xEnd; x += xStep) {
+        for (int32_t y = yStart; y != yEnd; y += yStep) {
+            const int32_t sourceX = x - xDiff, sourceY = y - yDiff;
+            const real_t sourceDepth = __depthBuffer->getAt(sourceX, sourceY);
+            const real_t depth = sourceDepth + zDiff;
+            if (sourceDepth == REAL_MAX || !__camera->isInZRange(depth) ||
+                !__camera->isValidPixel(sourceX, sourceY, __imageWidth, __imageHeight) ||
+                !__camera->isValidPixel(x, y, __imageWidth, __imageHeight))
+                continue;
+            renderRaster(x, y, depth, useDefaultColor || is_null_ptr(__frameBuffer)
+                ? defaultcolor : getFrameBufferAt(sourceX, sourceY));
         }
     }
 }
@@ -1174,3 +1217,530 @@ RealArray2Ptr PGL(formFactors)(const Point3ArrayPtr& points,
     return result;
 }
 
+
+namespace {
+
+void clipHemicubePolygon(std::vector<Vector3>& polygon, std::vector<Vector3>& clipped,
+                         const Vector3& planeNormal, real_t offset)
+{
+    clipped.clear();
+    Vector3 previous = polygon.back();
+    real_t previousDistance = dot(planeNormal, previous) + offset;
+    for (const auto& current : polygon) {
+        const real_t distance = dot(planeNormal, current) + offset;
+        if ((previousDistance < 0 && distance > 0) || (previousDistance > 0 && distance < 0)) {
+            const real_t t = previousDistance / (previousDistance - distance);
+            clipped.push_back(previous + (current - previous) * t);
+        }
+        if (distance >= 0) clipped.push_back(current);
+        previous = current;
+        previousDistance = distance;
+    }
+    polygon.swap(clipped);
+}
+
+void configureHemicubeFace(ZBufferEngine& buffer, bool topFace, real_t nearPlane, real_t farPlane)
+{
+    buffer.setFrustumCamera(-nearPlane, nearPlane, topFace ? -nearPlane : 0,
+                            nearPlane, nearPlane, farPlane);
+    buffer.lookAt(Vector3(0,0,0), Vector3(0,0,-1), Vector3(0,1,0));
+}
+
+void renderHemicubeFace(ZBufferEngine& buffer, const Point3Array& points,
+                       const Index3Array& triangles, const Vector3& center,
+                       const Vector3& direction, const Vector3& up,
+                       bool topFace, uint32_t emitterId, real_t nearPlane, real_t farPlane,
+                       Point3Array& cameraPoints, std::vector<Vector3>& polygon,
+                       std::vector<Vector3>& clipped)
+{
+    const Vector3 right = cross(direction, up);
+    for (std::size_t i = 0; i < points.size(); ++i) {
+        const Vector3 relative = points.getAt(i) - center;
+        cameraPoints.setAt(i, Vector3(dot(right, relative), dot(up, relative),
+                                      -dot(direction, relative)));
+    }
+
+    const std::array<Vector3, 6> planes = {
+        Vector3(0,0,-1), Vector3(0,0,1), Vector3(1,0,-1), Vector3(-1,0,-1),
+        Vector3(0,1,topFace ? -1 : 0), Vector3(0,-1,-1)
+    };
+    const std::array<real_t, 6> offsets = {-nearPlane, farPlane, 0, 0, 0, 0};
+    for (uint32_t id = 0; id < triangles.size(); ++id) {
+        if (id == emitterId) continue;
+        const auto& triangle = triangles.getAt(id);
+        polygon = {cameraPoints.getAt(triangle[0]), cameraPoints.getAt(triangle[1]),
+                   cameraPoints.getAt(triangle[2])};
+        for (std::size_t i = 0; i < planes.size() && polygon.size() >= 3; ++i)
+            clipHemicubePolygon(polygon, clipped, planes[i], offsets[i]);
+        for (std::size_t i = 1; i + 1 < polygon.size(); ++i) {
+            if (normSquared(cross(polygon[i] - polygon[0], polygon[i+1] - polygon[0])) > 0)
+                buffer.renderShadedTriangle(polygon[0], polygon[i], polygon[i + 1], true, id,
+                                            TriangleShaderPtr(), buffer.camera());
+        }
+    }
+}
+
+std::vector<real_t> hemicubePixelWeights(uint16_t resolution, bool topFace)
+{
+    const uint16_t height = topFace ? resolution : resolution / 2;
+    std::vector<real_t> weights(std::size_t(resolution) * height);
+    const real_t step = real_t(2) / resolution;
+    for (uint16_t y = 0; y < height; ++y) {
+        const real_t v = 1 - (y + real_t(0.5)) * step;
+        for (uint16_t x = 0; x < resolution; ++x) {
+            const real_t u = -1 + (x + real_t(0.5)) * step;
+            const real_t squaredDistance = 1 + u*u + v*v;
+            weights[std::size_t(y) * resolution + x] =
+                (topFace ? real_t(1) : v) * step*step / (GEOM_PI * squaredDistance*squaredDistance);
+        }
+    }
+    return weights;
+}
+
+template<class Worker>
+void runProjectionWorkers(std::size_t workerCount, const Worker& work)
+{
+    if (workerCount == 1) {
+        work();
+        return;
+    }
+    std::vector<std::future<void>> workers;
+    workers.reserve(workerCount - 1);
+    boost::asio::thread_pool pool(workerCount - 1);
+    for (std::size_t i = 1; i < workerCount; ++i) {
+        std::packaged_task<void()> task(work);
+        workers.push_back(task.get_future());
+        boost::asio::post(pool, [task = std::move(task)]() mutable { task(); });
+    }
+    work();
+    pool.join();
+    for (auto& worker : workers) worker.get();
+}
+
+void validateProjectionMesh(const Point3ArrayPtr& points, const Index3ArrayPtr& triangles)
+{
+    if (!points || !triangles)
+        throw std::invalid_argument("Projection requires points and triangle indices");
+    if (triangles->size() >= Shape::NOID)
+        throw std::invalid_argument("Too many triangles for projection identifiers");
+    for (const auto& triangle : *triangles) {
+        if (triangle[0] >= points->size() || triangle[1] >= points->size() ||
+            triangle[2] >= points->size())
+            throw std::invalid_argument("Invalid projection triangle vertex index");
+    }
+}
+
+void validateHemicubeMesh(const Point3ArrayPtr& points, const Index3ArrayPtr& triangles,
+                          uint16_t resolution, real_t nearPlane, real_t farPlane)
+{
+    validateProjectionMesh(points, triangles);
+    if (resolution < 2 || resolution % 2 != 0)
+        throw std::invalid_argument("Hemicube resolution must be a positive even integer");
+    if (!std::isfinite(nearPlane) || !std::isfinite(farPlane) ||
+        nearPlane <= 0 || farPlane <= nearPlane)
+        throw std::invalid_argument("Hemicube clipping planes must satisfy 0 < near < far");
+
+}
+
+void validateHemicubeEmitter(const Vector3& center, const Vector3& normal,
+                             uint32_t emitterId, std::size_t triangleCount)
+{
+    if (!center.isValid() || !normal.isValid() || norm(normal) <= GEOM_EPSILON)
+        throw std::invalid_argument("Hemicube requires a finite center and nonzero normal");
+    if (emitterId != Shape::NOID && emitterId >= triangleCount)
+        throw std::invalid_argument("Invalid hemicube emitter index");
+}
+
+struct HemicubeWeights {
+    explicit HemicubeWeights(uint16_t resolution) :
+        top(hemicubePixelWeights(resolution, true)),
+        side(hemicubePixelWeights(resolution, false))
+    {
+        // Preserve the summation order of the five rendered faces.
+        for (real_t weight : top) total += weight;
+        for (int face = 0; face < 4; ++face)
+            for (real_t weight : side) total += weight;
+    }
+
+    std::vector<real_t> top, side;
+    real_t total = 0;
+};
+
+class HemicubeWorkspace {
+public:
+    HemicubeWorkspace(std::size_t pointCount, std::size_t triangleCount,
+                      uint16_t resolution, real_t nearPlane, real_t farPlane,
+                      const HemicubeWeights& weights) :
+        top(resolution, resolution, ZBufferEngine::eIdBased, Color3::BLACK, Shape::NOID, false),
+        side(resolution, resolution / 2, ZBufferEngine::eIdBased, Color3::BLACK, Shape::NOID, false),
+        weights(weights),
+        cameraPoints(pointCount), contributions(triangleCount, 0),
+        nearPlane(nearPlane), farPlane(farPlane)
+    {
+        configureHemicubeFace(top, true, nearPlane, farPlane);
+        configureHemicubeFace(side, false, nearPlane, farPlane);
+        polygon.reserve(9);
+        clipped.reserve(9);
+    }
+
+    HemicubeFormFactorRow compute(const Point3Array& points, const Index3Array& triangles,
+                                  const Vector3& center, const Vector3& normal, uint32_t emitterId)
+    {
+        const Vector3 n = normal.normed();
+        const Vector3 right = cross(n, n.anOrthogonalVector()).normed();
+        const Vector3 up = cross(right, n);
+        const std::array<Vector3, 5> directions = {n, right, -right, up, -up};
+        real_t escaped = 0;
+        for (std::size_t face = 0; face < directions.size(); ++face) {
+            const bool topFace = face == 0;
+            auto& buffer = topFace ? top : side;
+            const auto& faceWeights = topFace ? weights.top : weights.side;
+            const auto depth = buffer.getDepthBuffer();
+            const auto ids = buffer.getIdBuffer();
+            std::fill(depth->begin(), depth->end(), REAL_MAX);
+            std::fill(ids->begin(), ids->end(), Shape::NOID);
+            renderHemicubeFace(buffer, points, triangles, center, directions[face], topFace ? up : n,
+                               topFace, emitterId, nearPlane, farPlane, cameraPoints, polygon, clipped);
+            auto weight = faceWeights.begin();
+            for (uint16_t y = 0; y < buffer.getImageHeight(); ++y) {
+                for (uint16_t x = 0; x < buffer.getImageWidth(); ++x, ++weight) {
+                    const uint32_t id = ids->getAt(x, y);
+                    if (id == Shape::NOID) escaped += *weight;
+                    else contributions[id] += *weight;
+                }
+            }
+        }
+
+        HemicubeFormFactorRow result;
+        for (uint32_t id = 0; id < contributions.size(); ++id) {
+            if (contributions[id] == 0) continue;
+            result.first.emplace(id, contributions[id] / weights.total);
+            contributions[id] = 0;
+        }
+        result.second = escaped / weights.total;
+        return result;
+    }
+
+private:
+    ZBufferEngine top, side;
+    const HemicubeWeights& weights;
+    Point3Array cameraPoints;
+    std::vector<Vector3> polygon, clipped;
+    std::vector<real_t> contributions;
+    real_t nearPlane, farPlane;
+};
+
+}
+
+HemicubeFormFactorRow PGL(hemicubeFormFactors)(
+    const Point3ArrayPtr& points, const Index3ArrayPtr& triangles,
+    const Vector3& center, const Vector3& normal, uint16_t resolution,
+    uint32_t emitterId, real_t nearPlane, real_t farPlane)
+{
+    validateHemicubeMesh(points, triangles, resolution, nearPlane, farPlane);
+    validateHemicubeEmitter(center, normal, emitterId, triangles->size());
+    const HemicubeWeights weights(resolution);
+    HemicubeWorkspace workspace(points->size(), triangles->size(), resolution, nearPlane, farPlane, weights);
+    return workspace.compute(*points, *triangles, center, normal, emitterId);
+}
+
+std::vector<HemicubeFormFactorRow> PGL(hemicubeFormFactorsBatch)(
+    const Point3ArrayPtr& points, const Index3ArrayPtr& triangles,
+    const Point3ArrayPtr& centers, const Point3ArrayPtr& normals, uint16_t resolution,
+    const Index& emitterIds, real_t nearPlane, real_t farPlane, unsigned threads)
+{
+    if (threads == 0)
+        throw std::invalid_argument("Hemicube batch requires at least one thread");
+    validateHemicubeMesh(points, triangles, resolution, nearPlane, farPlane);
+    if (!centers || !normals || centers->size() != normals->size() ||
+        (!emitterIds.empty() && emitterIds.size() != centers->size()))
+        throw std::invalid_argument("Hemicube batch requires one normal and optional triangle ID per center");
+
+    const std::size_t count = centers->size();
+    if (count == 0) return {};
+    const auto emitterId = [&](std::size_t i) {
+        return emitterIds.empty() ? Shape::NOID : emitterIds[i];
+    };
+    for (std::size_t i = 0; i < count; ++i) {
+        validateHemicubeEmitter(centers->getAt(i), normals->getAt(i), emitterId(i), triangles->size());
+    }
+
+    const HemicubeWeights weights(resolution);
+    std::vector<HemicubeFormFactorRow> rows(count);
+    const auto computeRow = [&](HemicubeWorkspace& workspace, std::size_t i) {
+        rows[i] = workspace.compute(*points, *triangles, centers->getAt(i), normals->getAt(i), emitterId(i));
+    };
+    const std::size_t workerCount = std::min<std::size_t>(threads, count);
+    if (workerCount == 1) {
+        HemicubeWorkspace workspace(points->size(), triangles->size(), resolution, nearPlane, farPlane, weights);
+        for (std::size_t i = 0; i < count; ++i) computeRow(workspace, i);
+        return rows;
+    }
+
+    std::atomic<std::size_t> next{0};
+    const auto work = [&]() {
+        // Each worker owns its buffers and writes disjoint result slots.
+        HemicubeWorkspace workspace(points->size(), triangles->size(), resolution, nearPlane, farPlane, weights);
+        for (auto i = next.fetch_add(1, std::memory_order_relaxed); i < count;
+             i = next.fetch_add(1, std::memory_order_relaxed))
+            computeRow(workspace, i);
+    };
+    runProjectionWorkers(workerCount, work);
+    return rows;
+}
+
+RealArrayPtr PGL(directionalFacePowersBatch)(
+    const Point3ArrayPtr& points, const Index3ArrayPtr& triangles, const Point3ArrayPtr& normals,
+    const Point3ArrayPtr& directions, const RealArrayPtr& irradiances, real_t pixelSize, unsigned threads)
+{
+    validateProjectionMesh(points, triangles);
+    if (!normals || normals->size() != triangles->size() ||
+        !directions || !irradiances || directions->size() != irradiances->size())
+        throw std::invalid_argument("Projection requires a normal per triangle and an irradiance per direction");
+    if (threads == 0 || !std::isfinite(pixelSize) || pixelSize < 0)
+        throw std::invalid_argument("Projection requires positive thread count and nonnegative pixel size");
+    const std::size_t triangleCount = triangles->size(), directionCount = directions->size();
+    RealArrayPtr powers(new RealArray(2 * triangleCount, 0));
+    if (triangleCount == 0 || directionCount == 0) return powers;
+
+    // Match the bounding box of the rasterized geometry, ignoring unused vertices.
+    Vector3 low = points->getAt(triangles->getAt(0)[0]), high = low;
+    for (const auto& triangle : *triangles)
+        for (int i = 0; i < 3; ++i) {
+            const auto& point = points->getAt(triangle[i]);
+            for (int axis = 0; axis < 3; ++axis) {
+                low[axis] = std::min(low[axis], point[axis]);
+                high[axis] = std::max(high[axis], point[axis]);
+            }
+        }
+    const Vector3 center = (low + high) / 2;
+    const Vector3 extent = high - low;
+    const real_t scale = max3(extent.x(), extent.y(), extent.z());
+    if (scale <= 0) return powers;
+    if (pixelSize == 0) pixelSize = scale / 100;
+    const real_t pixelArea = pixelSize * pixelSize;
+
+    using Contribution = std::pair<std::size_t, real_t>;
+    std::vector<std::vector<Contribution>> projected(directionCount);
+    const auto project = [&](std::size_t direction, std::vector<uint32_t>& counts) {
+        const real_t irradiance = irradiances->getAt(direction);
+        Vector3 ray = directions->getAt(direction);
+        const real_t length = norm(ray);
+        if (!std::isfinite(length) || length == 0 || !std::isfinite(irradiance) || irradiance < 0)
+            throw std::invalid_argument("Projection requires finite nonzero directions and nonnegative irradiance");
+        if (irradiance == 0) return;
+        ray /= length;
+        if (std::none_of(normals->begin(), normals->end(), [&](const Vector3& n) { return dot(n, ray) != 0; }))
+            return;
+
+        // Use the same camera framing as directionalInterception_zbuffer_from_dir_vectors.
+        Vector3 forward = ray;
+        Vector3 up = forward.anOrthogonalVector();
+        forward.normalize();
+        up.normalize();
+        Vector3 right = cross(up, forward);
+        right.normalize();
+        Vector3 projectedUp = cross(forward, right);
+        projectedUp.normalize();
+        const Matrix3 projection = Matrix3(right, projectedUp, forward).inverse();
+        Vector3 projectedLow = projection * low, projectedHigh = projectedLow;
+        for (int corner = 0; corner < 8; ++corner) {
+            const Vector3 point = projection * Vector3(corner & 1 ? high.x() : low.x(),
+                                                     corner & 2 ? high.y() : low.y(),
+                                                     corner & 4 ? high.z() : low.z());
+            for (int axis = 0; axis < 2; ++axis) {
+                projectedLow[axis] = std::min(projectedLow[axis], point[axis]);
+                projectedHigh[axis] = std::max(projectedHigh[axis], point[axis]);
+            }
+        }
+
+        const auto dimension = [&](real_t span) {
+            const real_t pixels = std::max(real_t(2), std::ceil(span / pixelSize) + 1);
+            if (!std::isfinite(pixels) || pixels > std::numeric_limits<uint16_t>::max())
+                throw std::invalid_argument("Directional projection exceeds the raster size limit");
+            return static_cast<uint16_t>(pixels);
+        };
+        const uint16_t width = dimension(projectedHigh.x() - projectedLow.x());
+        const uint16_t height = dimension(projectedHigh.y() - projectedLow.y());
+        ZBufferEngine buffer(width, height, ZBufferEngine::eIdBased, Color3::BLACK, Shape::NOID, false);
+        const real_t halfWidth = width * pixelSize / 2, halfHeight = height * pixelSize / 2;
+        buffer.setOrthographicCamera(-halfWidth, halfWidth, -halfHeight, halfHeight, scale, 3 * scale);
+        buffer.lookAt(center - forward * scale * 2, center, up);
+        const auto camera = buffer.camera();
+        for (uint32_t id = 0; id < triangleCount; ++id) {
+            const auto& triangle = triangles->getAt(id);
+            buffer.renderShadedTriangle(points->getAt(triangle[0]), points->getAt(triangle[1]),
+                                        points->getAt(triangle[2]), true, id, TriangleShaderPtr(), camera);
+        }
+
+        std::fill(counts.begin(), counts.end(), 0);
+        const auto ids = buffer.getIdBuffer();
+        for (uint32_t id : *ids)
+            if (id != Shape::NOID) ++counts[id];
+        auto& result = projected[direction];
+        for (std::size_t id = 0; id < triangleCount; ++id) {
+            if (counts[id] == 0) continue;
+            const real_t cosine = -dot(normals->getAt(id), ray);
+            if (cosine != 0)
+                result.emplace_back(2 * id + (cosine < 0), counts[id] * pixelArea * irradiance);
+        }
+    };
+
+    std::atomic<std::size_t> next{0};
+    const auto work = [&]() {
+        std::vector<uint32_t> counts(triangleCount);
+        for (auto i = next.fetch_add(1, std::memory_order_relaxed); i < directionCount;
+             i = next.fetch_add(1, std::memory_order_relaxed))
+            project(i, counts);
+    };
+    runProjectionWorkers(std::min<std::size_t>(threads, directionCount), work);
+    // Keep the same accumulation order for all thread counts.
+    for (const auto& direction : projected)
+        for (const auto& contribution : direction)
+            (*powers)[contribution.first] += contribution.second;
+    return powers;
+}
+
+namespace {
+
+// Compensated summation keeps the stopping criterion stable for small residuals.
+double sumRadiosityPower(const std::vector<double>& powers)
+{
+    double sum = 0, correction = 0;
+    for (double power : powers) {
+        const double next = sum + power;
+        correction += sum >= power ? (sum - next) + power : (power - next) + sum;
+        sum = next;
+    }
+    return sum + correction;
+}
+
+}
+
+struct RadiosityTransport::Impl {
+    struct Link {
+        std::size_t face;
+        double factor, rho, tau, absorptance;
+    };
+
+    struct Row {
+        double escape;
+        std::vector<Link> links;
+    };
+
+    Point3ArrayPtr points;
+    Index3ArrayPtr triangles;
+    Point3ArrayPtr centers, normals;
+    std::vector<double> reflectance, transmittance;
+    bool twoSided;
+    uint16_t resolution;
+    real_t nearPlane, farPlane;
+    unsigned threads;
+    std::vector<std::optional<Row>> rows;
+
+    void prepareRows(const std::vector<double>& pending)
+    {
+        std::vector<std::size_t> missing;
+        for (std::size_t face = 0; face < pending.size(); ++face)
+            if (pending[face] != 0 && !rows[face]) missing.push_back(face);
+        if (missing.empty()) return;
+
+        Point3ArrayPtr batchCenters(new Point3Array(missing.size()));
+        Point3ArrayPtr batchNormals(new Point3Array(missing.size()));
+        Index emitterIds(missing.size());
+        for (std::size_t i = 0; i < missing.size(); ++i) {
+            const std::size_t face = missing[i], source = face / 2;
+            batchCenters->setAt(i, centers->getAt(source));
+            const Vector3& normal = normals->getAt(source);
+            batchNormals->setAt(i, face % 2 ? -normal : normal);
+            emitterIds[i] = static_cast<uint32_t>(source);
+        }
+        const auto factors = hemicubeFormFactorsBatch(points, triangles, batchCenters, batchNormals,
+                                                      resolution, emitterIds, nearPlane, farPlane, threads);
+        for (std::size_t i = 0; i < missing.size(); ++i) {
+            const std::size_t face = missing[i], source = face / 2;
+            Row row{factors[i].second, {}};
+            row.links.reserve(factors[i].first.size());
+            const auto& origin = centers->getAt(source);
+            for (const auto& entry : factors[i].first) {
+                const std::size_t target = entry.first;
+                const bool front = dot(normals->getAt(target), origin - centers->getAt(target)) > 0;
+                const double rho = front || twoSided ? reflectance[target] : 0.0;
+                const double tau = transmittance[target];
+                row.links.push_back({2 * target + !front, entry.second, rho, tau, 1 - (rho + tau)});
+            }
+            // Process links in triangle order, as in the Python solver.
+            std::sort(row.links.begin(), row.links.end(),
+                      [](const Link& a, const Link& b) { return a.face < b.face; });
+            rows[face] = std::move(row);
+        }
+    }
+};
+
+RadiosityTransport::RadiosityTransport(
+    const Point3ArrayPtr& points, const Index3ArrayPtr& triangles,
+    const Point3ArrayPtr& centers, const Point3ArrayPtr& normals,
+    const std::vector<double>& reflectance, const std::vector<double>& transmittance, bool twoSided,
+    uint16_t resolution, real_t nearPlane, real_t farPlane, unsigned threads)
+{
+    validateHemicubeMesh(points, triangles, resolution, nearPlane, farPlane);
+    const std::size_t count = triangles->size();
+    if (!centers || !normals || centers->size() != count || normals->size() != count ||
+        reflectance.size() != count || transmittance.size() != count || threads == 0)
+        throw std::invalid_argument("Radiosity transport requires geometry and optics for every triangle");
+    for (std::size_t i = 0; i < count; ++i) {
+        if (!std::isfinite(reflectance[i]) || !std::isfinite(transmittance[i]) ||
+            reflectance[i] < 0 || transmittance[i] < 0 || reflectance[i] + transmittance[i] > 1)
+            throw std::invalid_argument("Invalid radiosity transport coefficients");
+    }
+    data.reset(new Impl{points, triangles, centers, normals, reflectance, transmittance, twoSided,
+                        resolution, nearPlane, farPlane, threads,
+                        std::vector<std::optional<Impl::Row>>(2 * count)});
+}
+
+RadiosityTransport::~RadiosityTransport() = default;
+
+RadiosityPropagation RadiosityTransport::propagate(
+    std::vector<double> pending, std::size_t maxBounces, double threshold)
+{
+    if (pending.size() != data->rows.size() || !std::isfinite(threshold) || threshold < 0 ||
+        std::any_of(pending.begin(), pending.end(), [](double p) { return !std::isfinite(p) || p < 0; }))
+        throw std::invalid_argument("Invalid power supplied to radiosity transport");
+
+    const auto count = data->triangles->size();
+    RadiosityPropagation result;
+    result.outgoing = pending;
+    result.incident.resize(count, 0);
+    result.absorbed.resize(count, 0);
+    result.remaining = sumRadiosityPower(pending);
+    std::vector<double> next(pending.size());
+    while (result.bounces < maxBounces && result.remaining > threshold) {
+        data->prepareRows(pending);
+        std::fill(next.begin(), next.end(), 0);
+        for (std::size_t source = 0; source < pending.size(); ++source) {
+            const double power = pending[source];
+            if (power == 0) continue;
+            const auto& row = *data->rows[source];
+            const double escaped = power * row.escape;
+            result.escaped += escaped;
+            for (const auto& link : row.links) {
+                const std::size_t face = link.face, target = face / 2;
+                const std::size_t opposite = face ^ 1;
+                const double received = power * link.factor;
+                const double reflected = received * link.rho;
+                const double transmitted = received * link.tau;
+                const double absorbed = received * link.absorptance;
+                result.incident[target] += received;
+                result.absorbed[target] += absorbed;
+                next[face] += reflected;
+                next[opposite] += transmitted;
+                result.outgoing[face] += reflected;
+                result.outgoing[opposite] += transmitted;
+            }
+        }
+        pending.swap(next);
+        result.remaining = sumRadiosityPower(pending);
+        ++result.bounces;
+    }
+    return result;
+}

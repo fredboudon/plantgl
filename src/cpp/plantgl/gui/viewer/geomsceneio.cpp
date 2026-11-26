@@ -319,20 +319,53 @@ ViewGeomSceneGL::openStream(std::istream& stream)
 
 namespace {
 
-void selectExistingFile(QWidget * frame, QObject * context, const QString& caption,
-                        const QString& initial, const QString& filter,
-                        const std::function<void(const QString&)>& onSelected)
+void showFileDialog(QDialog * dialog)
 {
   // Let the menu close before the native panel takes keyboard focus.
-  auto * dialog = new QFileDialog(frame->window(), caption, initial, filter);
-  dialog->setFileMode(QFileDialog::ExistingFile);
   dialog->setWindowModality(Qt::WindowModal);
   dialog->setAttribute(Qt::WA_DeleteOnClose);
-  QObject::connect(dialog, &QFileDialog::fileSelected, context, onSelected, Qt::QueuedConnection);
   QTimer::singleShot(0, dialog, [dialog]() {
     dialog->show();
     dialog->activateWindow();
   });
+}
+
+void selectExistingFile(QWidget * frame, QObject * context, const QString& caption,
+                        const QString& initial, const QString& filter,
+                        const std::function<void(const QString&)>& onSelected)
+{
+  auto * dialog = new QFileDialog(frame->window(), caption, initial, filter);
+  dialog->setFileMode(QFileDialog::ExistingFile);
+  QObject::connect(dialog, &QFileDialog::fileSelected, context, onSelected, Qt::QueuedConnection);
+  showFileDialog(dialog);
+}
+
+void selectSaveFile(QWidget * frame, QObject * context, const QString& initial,
+                    const QString& extension, const QString& filter,
+                    const std::function<void(const QString&)>& onSelected)
+{
+  auto * dialog = new QFileDialog(frame->window(), QStringLiteral("Save"),
+                                 QFileInfo(initial).path(), filter);
+  dialog->setAcceptMode(QFileDialog::AcceptSave);
+  dialog->setDefaultSuffix(extension);
+  QObject::connect(dialog, &QFileDialog::fileSelected, context,
+                   [frame, extension, onSelected](const QString& filename) {
+    const QFileInfo file(filename);
+    if (!extension.isEmpty() && extension.compare(file.suffix(), Qt::CaseInsensitive) != 0) {
+      const QString target = file.dir().filePath(file.completeBaseName() + '.' + extension);
+      if (QFile::exists(target) &&
+          QMessageBox::warning(frame->window(), QObject::tr("File Already Exists"),
+              QObject::tr("%1 already exists. Overwrite?").arg(target),
+              QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel) != QMessageBox::Yes) {
+        return;
+      }
+      onSelected(target);
+    }
+    else {
+      onSelected(filename);
+    }
+  }, Qt::QueuedConnection);
+  showFileDialog(dialog);
 }
 
 } // namespace
@@ -781,30 +814,19 @@ ViewGeomSceneGL::save()
 void
 ViewGeomSceneGL::saveAs()
 {
-  QString initial = getFilename();
-  QFileInfo fileinfo(initial);
-  QString extension=fileinfo.suffix();
-  extension= extension.toUpper();
-  if(!extension.isEmpty() && extension != "GEOM" && extension != "BGEOM" ){
-    initial = initial.left(initial.lastIndexOf('.')+1);
-    initial += "geom";
-  }
-  QString filename = ViewFileManager::getSaveFileName(initial,"",tr("PlantGL File")+" (*.geom;*.bgeom);;"+tr("All Files (*.*)"),__frame);
-  if(!filename.isEmpty()){
-    if(saveAsGeom(filename)){
-      setFilename(filename);
-    }
-  }
+  selectSaveFile(__frame, this, getFilename(), QString(),
+                 tr("PlantGL File") + " (*.geom;*.bgeom);;" + tr("All Files (*.*)"),
+                 [this](const QString& filename) {
+    if (saveAsGeom(filename)) setFilename(filename);
+  });
 }
 
 void
 ViewGeomSceneGL::saveAsGeom()
 {
-  QString shape, geom, mat;
-  if(getGeomFilenames(shape,geom, mat)){
-    if(saveScene(shape,geom,mat,__scene))
-      setFilename(shape);
-  }
+  selectGeomFilenames([this](const QString& shape, const QString& geom, const QString& mat) {
+    if (saveScene(shape, geom, mat, __scene)) setFilename(shape);
+  });
 }
 
 void
@@ -815,10 +837,9 @@ ViewGeomSceneGL::saveSelection()
                                    "Ok");
     return;
   }
-  QString shape, geom, mat;
-  if(getGeomFilenames(shape,geom, mat)){
-    saveScene(shape,geom,mat,getSelection());
-  }
+  selectGeomFilenames([this](const QString& shape, const QString& geom, const QString& mat) {
+    saveScene(shape, geom, mat, getSelection());
+  });
 }
 
 void
@@ -829,10 +850,9 @@ ViewGeomSceneGL::saveNotSelection()
                                    "Ok");
     return;
   }
-  QString shape, geom, mat;
-  if(getGeomFilenames(shape,geom, mat)){
-    saveScene(shape,geom,mat,getNotSelection());
-  }
+  selectGeomFilenames([this](const QString& shape, const QString& geom, const QString& mat) {
+    saveScene(shape, geom, mat, getNotSelection());
+  });
 }
 
 /* ----------------------------------------------------------------------- */
@@ -899,10 +919,10 @@ protected:
   QRadioButton *  __appearance;
 };
 
-bool
-ViewGeomSceneGL::getGeomFilenames(QString& shape,QString& geom, QString& mat)
+void
+ViewGeomSceneGL::selectGeomFilenames(
+  const std::function<void(const QString&, const QString&, const QString&)>& onSelected)
 {
-  shape = QString();
   QString initial = getFilename();
   QString extension=getFilename().right(getFilename().length()-getFilename().lastIndexOf('.')-1);
   extension= extension.toUpper();
@@ -911,65 +931,39 @@ ViewGeomSceneGL::getGeomFilenames(QString& shape,QString& geom, QString& mat)
     initial += "geom";
   }
 
-  GeomDialog dialog( initial, tr("PlantGL File")+" (*.geom;*.bgeom);;"+tr("All Files (*.*)"), __frame,qPrintable(tr("Save")));
-  if(dialog.exec() != QFileDialog::Rejected) shape = dialog.selectedFiles()[0];
+  auto * dialog = new GeomDialog(initial, tr("PlantGL File") + " (*.geom;*.bgeom);;" +
+                                 tr("All Files (*.*)"), __frame->window(), qPrintable(tr("Save")));
+  dialog->setAcceptMode(QFileDialog::AcceptSave);
+  dialog->setOption(QFileDialog::DontConfirmOverwrite);
+  dialog->setDefaultSuffix("geom");
+  connect(dialog, &QFileDialog::fileSelected, this, [this, dialog, onSelected](const QString& filename) {
+    const bool separateGeometry = dialog->geometrySeparated();
+    const bool separateAppearance = dialog->appearanceSeparated();
+    QTimer::singleShot(0, this, [this, onSelected, filename, separateGeometry, separateAppearance]() {
+      const QFileInfo file(filename);
+      const bool binary = file.suffix().compare("bgeom", Qt::CaseInsensitive) == 0;
+      const QString base = file.dir().filePath(file.completeBaseName());
+      const QString shape = binary || file.suffix().compare("geom", Qt::CaseInsensitive) == 0
+                          ? filename : base + ".geom";
+      const QString geom = !binary && separateGeometry ? base + "_geom.geom" : QString();
+      const QString mat = !binary && separateAppearance ? base + ".mat" : QString();
 
-  if(shape.isEmpty())return false;
-  else {
-    QString extension=shape.right(shape.length()-shape.lastIndexOf('.')-1);
-    extension= extension.toUpper();
-    if (extension != "GEOM" && extension != "BGEOM" ) {
-      shape = shape.left(shape.lastIndexOf('.')+1);
-      shape += "GEOM";
-    }
-  }
-  extension=shape.right(shape.length()-shape.lastIndexOf('.')-1);
-  extension= extension.toUpper();
-
-  if(extension != "BGEOM" &&dialog.geometrySeparated()){
-    geom = shape.left(shape.lastIndexOf('.')-1);
-    geom += "_geom.geom";
-  }
-  if(extension != "BGEOM" &&dialog.appearanceSeparated()){
-    mat = shape.left(shape.lastIndexOf('.')+1);
-    mat += "mat";
-  }
-  if(QFile::exists(shape)){
-
-    int res;
-    if(extension != "BGEOM" &&
-      (dialog.geometrySeparated() || dialog.appearanceSeparated()))
-    res = QMessageBox::warning(__frame,tr("File Already Exists"),tr("Shape File")+" "+ shape
-                                   + " "+tr("already exists. Overwrite ?"),
-                                   tr("Yes"),tr("Yes To All"),tr("Cancel"));
-    else
-    res = QMessageBox::warning(__frame,tr("File Already Exists"),tr("Shape File")+" "+ shape
-                                   + " "+tr("already exists. Overwrite ?"),
-                                   tr("Yes"),tr("Cancel"));
-    if(res !=0 && res !=1)return false;
-    if(res == 1)return true;
-    if(extension != "BGEOM"){
-      if(dialog.geometrySeparated()){
-        if(dialog.appearanceSeparated())
-          res = QMessageBox::warning(__frame,tr("File Already Exists"),tr("Geometry File")+" "+ geom
-          + " " + tr("already exists. Overwrite ?"),
-          tr("Yes"),tr("Yes To All"),tr("Cancel"));
-        else
-          res = QMessageBox::warning(__frame,tr("File Already Exists"),tr("Geometry File")+" "+ geom
-          + " "+ tr("already exists. Overwrite ?"),
-          tr("Yes"),tr("Cancel"));
-        if(res !=0 && res !=1)return false;
-        if(res == 1)return true;
+      QStringList existingFiles;
+      for (const QString& path : {shape, geom, mat}) {
+        if (QFile::exists(path)) existingFiles.append(path);
       }
-      if(dialog.appearanceSeparated()){
-        res = QMessageBox::warning(__frame,tr("File Already Exists"),tr("Appearance File")+" "+ mat
-          + " "+tr("already exists. Overwrite ?"),
-          tr("Yes"),tr("Cancel"));
-        if(res !=0)return false;
+      for (const QString& path : existingFiles) {
+        QMessageBox::StandardButtons buttons = QMessageBox::Yes | QMessageBox::Cancel;
+        if (existingFiles.size() > 1) buttons |= QMessageBox::YesToAll;
+        const auto answer = QMessageBox::warning(__frame->window(), tr("File Already Exists"),
+            tr("%1 already exists. Overwrite?").arg(path), buttons, QMessageBox::Cancel);
+        if (answer == QMessageBox::YesToAll) break;
+        if (answer != QMessageBox::Yes) return;
       }
-    }
-  }
-  return true;
+      onSelected(shape, geom, mat);
+    });
+  });
+  showFileDialog(dialog);
 }
 
 bool
@@ -1037,43 +1031,50 @@ ViewGeomSceneGL::saveScene(const QString& shape,
 void
 ViewGeomSceneGL::saveAsPovRay()
 {
-  QString filename = ViewFileManager::getSaveFileName(getFilename(),"pov",tr("PovRay File")+" (*.pov);;"+tr("All Files (*.*)"),__frame);
-  if(!filename.isEmpty()){
+  selectSaveFile(__frame, this, getFilename(), "pov", tr("PovRay File")+" (*.pov);;"+tr("All Files (*.*)"),
+                 [this](const QString& filename) {
     saveAsPovRay(filename);
-  }
+  });
 }
 
 void
 ViewGeomSceneGL::saveAsVegeStar()
 {
-  QString filename = ViewFileManager::getSaveFileName(getFilename(),"vgx",tr("VegeStar File")+" (*.vgx;*.vgs);;"+tr("All Files (*.*)"),__frame);
-  if(!filename.isEmpty()){
+  selectSaveFile(__frame, this, getFilename(), "vgx", tr("VegeStar File")+" (*.vgx;*.vgs);;"+tr("All Files (*.*)"),
+                 [this](const QString& filename) {
     saveAsVegeStar(filename);
-  }
+  });
 }
 
 void
 ViewGeomSceneGL::saveAsAmapSymbol()
 {
-  QString filename = ViewFileManager::getSaveFileName(getFilename(),"smb",tr("Amap Symbol")+" (*.smb);;"+tr("All Files (*.*)"),__frame);
-  if(!filename.isEmpty()){
+  selectSaveFile(__frame, this, getFilename(), "smb", tr("Amap Symbol")+" (*.smb);;"+tr("All Files (*.*)"),
+                 [this](const QString& filename) {
     saveAsAmapSymbol(filename);
-  }
+  });
 }
 
 void
 ViewGeomSceneGL::saveAsLinetree(){
-  QString filename = getFilename();
-  if(filename.isEmpty())saveAsLinetree(QString(""));
-  else {
-      QString extension=QFileInfo(filename).suffix();
-      extension= extension.toUpper();
-      if (extension != "LIG") {
-          filename = filename.left(filename.lastIndexOf('.')+1);
-          filename += "lig";
-      }
-      saveAsLinetree(filename);
+  auto * dialog = new ViewReadLinetree(false, __frame->window());
+  const QString filename = getFilename();
+  if (!filename.isEmpty()) {
+    const QFileInfo file(filename);
+    dialog->setLigFile(file.suffix().compare("lig", Qt::CaseInsensitive) == 0
+                       ? filename : file.dir().filePath(file.completeBaseName() + ".lig"));
   }
+  connect(dialog, &QDialog::accepted, this, [this, dialog]() {
+    const QString lig = dialog->getLigFile();
+    const QString dta = dialog->getDtaFile();
+    const QString smb = dialog->getSMBPath();
+    const QString key = dialog->getKey();
+    const bool bigEndian = dialog->bigEndian();
+    QTimer::singleShot(0, this, [this, lig, dta, smb, key, bigEndian]() {
+      saveAsLinetree(lig, dta, smb, key, bigEndian);
+    });
+  });
+  showFileDialog(dialog);
 }
 
 bool
@@ -1216,41 +1217,43 @@ ViewGeomSceneGL::saveAsLinetree(const QString& lig,
 void
 ViewGeomSceneGL::saveAsVrml()
 {
-  QString filename = ViewFileManager::getSaveFileName(getFilename(),"wrl",tr("Vrml File")+" (*.wrl);;"+tr("All Files (*.*)"),__frame);
-  ofstream _stream(qPrintable(filename));
-  if(_stream){
-    VrmlPrinter _printer(_stream,__discretizer);
-    _printer.header(qPrintable(tr("File Generated with PlantGL 3D Viewer")));
-    if(fabs(__camera->getAzimuth()) > GEOM_EPSILON   ||
-       fabs(__camera->getElevation()) > GEOM_EPSILON ||
-       __camera->getTranslation() != Vector3::ORIGIN)
-    _printer.setCamera(__camera->getEye()-__camera->getTranslation(),__camera->getAzimuth(),__camera->getElevation(),"Geom View");
-    _printer.setCamera(__camera->getEye(),0,0,"Home");
-    const QColor& col = __light->getDiffuse();
-    const QColor& col2 = __light->getAmbient();
-    _printer.setLight(__light->getPosition(),Color3(col2.red(),col2.green(),col2.blue()),
-                      Color3(col.red(),col.green(),col.blue()),4*norm(__light->getPosition()));
-    const QOpenGLBaseContext * c =__frame->context();
-    //if(c){
-      //QColor bg = c->overlayTransparentColor();
-      //if(bg.isValid())_printer.setBackGround(Color3(bg.red(),bg.green(),bg.blue()));
-      //else {
-      //  ViewGLFrame * f = dynamic_cast<ViewGLFrame *>(__frame);
-      //  if(f != NULL){
-      //      bg = f->getBackGroundColor();
-      //      _printer.setBackGround(Color3(bg.red(),bg.green(),bg.blue()));
+  selectSaveFile(__frame, this, getFilename(), "wrl", tr("Vrml File")+" (*.wrl);;"+tr("All Files (*.*)"),
+                 [this](const QString& filename) {
+    ofstream _stream(qPrintable(filename));
+    if(_stream){
+      VrmlPrinter _printer(_stream,__discretizer);
+      _printer.header(qPrintable(tr("File Generated with PlantGL 3D Viewer")));
+      if(fabs(__camera->getAzimuth()) > GEOM_EPSILON   ||
+         fabs(__camera->getElevation()) > GEOM_EPSILON ||
+         __camera->getTranslation() != Vector3::ORIGIN)
+      _printer.setCamera(__camera->getEye()-__camera->getTranslation(),__camera->getAzimuth(),__camera->getElevation(),"Geom View");
+      _printer.setCamera(__camera->getEye(),0,0,"Home");
+      const QColor& col = __light->getDiffuse();
+      const QColor& col2 = __light->getAmbient();
+      _printer.setLight(__light->getPosition(),Color3(col2.red(),col2.green(),col2.blue()),
+                        Color3(col.red(),col.green(),col.blue()),4*norm(__light->getPosition()));
+      const QOpenGLBaseContext * c =__frame->context();
+      //if(c){
+        //QColor bg = c->overlayTransparentColor();
+        //if(bg.isValid())_printer.setBackGround(Color3(bg.red(),bg.green(),bg.blue()));
+        //else {
+        //  ViewGLFrame * f = dynamic_cast<ViewGLFrame *>(__frame);
+        //  if(f != NULL){
+        //      bg = f->getBackGroundColor();
+        //      _printer.setBackGround(Color3(bg.red(),bg.green(),bg.blue()));
+        //  }
       //  }
-    //  }
-    //}
-    __scene->apply(_printer);
-  }
+      //}
+      __scene->apply(_printer);
+    }
+  });
 }
 
 void
 ViewGeomSceneGL::saveAsPly()
 {
-  QString filename = ViewFileManager::getSaveFileName(getFilename(),"ply",tr("Ply File")+ " (*.ply);;"+tr("All Files (*.*)"),__frame);
-  if(!filename.isEmpty()){
+  selectSaveFile(__frame, this, getFilename(), "ply", tr("Ply File")+ " (*.ply);;"+tr("All Files (*.*)"),
+                 [this](const QString& filename) {
     PlyPrinter::ply_format _format = PlyPrinter::ply_ascii;
     switch(QMessageBox::warning(__frame,"Ply Format",tr("Ply File Format"),
                                 tr("Ascii"),tr("Binary Little Endian"),tr("Binary Big Endian"))){
@@ -1270,7 +1273,7 @@ ViewGeomSceneGL::saveAsPly()
     Tesselator t;
     PlyPrinter::print(__scene,t,filename.toStdString(),
       qPrintable(tr("File Generated with PlantGL 3D Viewer")),_format);
-  }
+  });
 }
 
 

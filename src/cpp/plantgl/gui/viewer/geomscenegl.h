@@ -48,6 +48,7 @@
 
 /* ----------------------------------------------------------------------- */
 
+#include <functional>
 #include "../base/modalscenegl.h"
 #include <plantgl/scenegraph/scene/scene.h>
 #include <plantgl/scenegraph/geometry/polyline.h>
@@ -230,9 +231,8 @@ class VIEW_API ViewGeomSceneGL  : public ViewModalRendererGL
 
   bool hasSameMaterial() const;
 
-  bool getGeomFilenames(QString& shape,
-                        QString& geom,
-                        QString& mat);
+  void selectGeomFilenames(
+    const std::function<void(const QString&, const QString&, const QString&)>& onSelected);
 
   /// Save the scene \bscene in GEOM format in the file \b filename.
   bool saveScene(const QString& shape,

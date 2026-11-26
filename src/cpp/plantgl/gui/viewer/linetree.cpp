@@ -46,6 +46,7 @@
 #include <plantgl/tool/util_enviro.h>
 
 #include <QtGlobal>
+#include <QTimer>
 #include <QtCore/qtextstream.h>
 #include <QRegularExpression>
 #include <QtGui/qevent.h>
@@ -370,6 +371,28 @@ void ViewReadLinetree::setEndianess( bool bigEndian ){
    checkKey();
 }
 
+namespace {
+
+void selectLinetreePath(ViewReadLinetree * parent, const QString& title, const QString& initial,
+                        const QString& filter, QFileDialog::FileMode mode,
+                        QFileDialog::AcceptMode acceptMode,
+                        void (ViewReadLinetree::*onSelected)(const QString&))
+{
+  auto * dialog = new QFileDialog(parent, title, initial, filter);
+  dialog->setFileMode(mode);
+  dialog->setAcceptMode(acceptMode);
+  dialog->setOption(QFileDialog::ShowDirsOnly, mode == QFileDialog::Directory);
+  dialog->setWindowModality(Qt::WindowModal);
+  dialog->setAttribute(Qt::WA_DeleteOnClose);
+  QObject::connect(dialog, &QFileDialog::fileSelected, parent, onSelected, Qt::QueuedConnection);
+  QTimer::singleShot(0, dialog, [dialog]() {
+    dialog->show();
+    dialog->activateWindow();
+  });
+}
+
+} // namespace
+
 void ViewReadLinetree::SelectLigFile(){
 
   QString initial;
@@ -377,11 +400,10 @@ void ViewReadLinetree::SelectLigFile(){
   else if(!editDta->text().isEmpty())initial = editDta->text();
   else if(!editSmb->text().isEmpty())initial = editSmb->text();
 
-  QString _filename;
-  if(__open)_filename =  QFileDialog::getOpenFileName ( this, "Open Lig File", initial,"Lig Files (*.lig)"  );
-  else _filename =  QFileDialog::getSaveFileName ( this, "Save Lig File", initial,"Lig Files (*.lig)" );
-  if(!_filename.isEmpty())
-    setLigFile(_filename);
+  selectLinetreePath(this, __open ? "Open Lig File" : "Save Lig File", initial, "Lig Files (*.lig)",
+                     __open ? QFileDialog::ExistingFile : QFileDialog::AnyFile,
+                     __open ? QFileDialog::AcceptOpen : QFileDialog::AcceptSave,
+                     &ViewReadLinetree::setLigFile);
 }
 
 void ViewReadLinetree::SelectDtaFile(){
@@ -390,11 +412,10 @@ void ViewReadLinetree::SelectDtaFile(){
   else if(!editLig->text().isEmpty())initial = editLig->text();
   else if(!editSmb->text().isEmpty())initial = editSmb->text();
 
-  QString _filename;
-  if(__open)_filename =  QFileDialog::getOpenFileName ( this, "Open Dta File",initial, "Dta Files (*.dta)"  );
-  else _filename =  QFileDialog::getSaveFileName ( this, "Save Dta File", initial,"Dta Files (*.dta)" );
-  if(!_filename.isEmpty())
-    setDtaFile(_filename);
+  selectLinetreePath(this, __open ? "Open Dta File" : "Save Dta File", initial, "Dta Files (*.dta)",
+                     __open ? QFileDialog::ExistingFile : QFileDialog::AnyFile,
+                     __open ? QFileDialog::AcceptOpen : QFileDialog::AcceptSave,
+                     &ViewReadLinetree::setDtaFile);
 }
 
 void ViewReadLinetree::SelectSMBPath(){
@@ -403,10 +424,8 @@ void ViewReadLinetree::SelectSMBPath(){
   else if(!editLig->text().isEmpty())dir = (editLig->text().left(editDta->text().lastIndexOf('/')));
   else if(!editDta->text().isEmpty())dir = (editDta->text().left(editDta->text().lastIndexOf('/')));
 
-  QString path;
-  path = QFileDialog::getExistingDirectory(this,QString("Select SMB Path"),dir);
-  if(!path.isEmpty())
-    setSMBPath(path);
+  selectLinetreePath(this, "Select SMB Path", dir, QString(), QFileDialog::Directory,
+                     QFileDialog::AcceptOpen, &ViewReadLinetree::setSMBPath);
 }
 
 void ViewReadLinetree::testEndianess(){
